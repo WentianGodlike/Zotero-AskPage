@@ -1,10 +1,10 @@
 {
-  "name": "zotero-highlight-ask",
+  "name": "zotero-askpage",
   "type": "module",
-  "version": "0.13.3",
+  "version": "0.14.0",
   "description": "Highlight text in Zotero PDF reader and ask DeepSeek to explain it.",
   "config": {
-    "addonName": "Highlight Ask",
+    "addonName": "AskPage",
     "addonID": "highlight-ask@yangruiyu.dev",
     "addonRef": "highlightask",
     "addonInstance": "HighlightAsk",
@@ -12,7 +12,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/local/highlight-ask.git"
+    "url": "git+https://github.com/WentianGodlike/Zotero-AskPage.git"
   },
   "author": "yangruiyu (based on zotero-plugin-template by windingwind and contributors)",
   "bugs": {
