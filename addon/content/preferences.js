@@ -414,6 +414,7 @@
     $("debugScreenshot").checked = Boolean(readPref("debugScreenshot", true));
     $("retrievePassages").checked = Boolean(readPref("retrievePassages", true));
     $("retrieveTopK").value = String(readPref("retrieveTopK", 5));
+    $("alwaysRetrieve").checked = Boolean(readPref("alwaysRetrieve", true));
     renderPromptFields();
     paintDataDir();
 
@@ -501,6 +502,7 @@
     writePref("debugScreenshot", $("debugScreenshot").checked);
     writePref("retrievePassages", $("retrievePassages").checked);
     writePref("retrieveTopK", Number($("retrieveTopK").value) || 5);
+    writePref("alwaysRetrieve", $("alwaysRetrieve").checked);
 
     var maxChars = Number($("fullTextMaxChars").value.trim());
     if (!isFinite(maxChars) || maxChars < 1000) {

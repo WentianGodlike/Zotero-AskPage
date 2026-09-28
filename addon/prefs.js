@@ -50,6 +50,12 @@ pref("fullTextMaxChars", 120000);
 pref("retrievePassages", true);
 // How many passages to retrieve.
 pref("retrieveTopK", 5);
+// Send retrieved passages even when the document would fit whole.
+//
+// A 120K-character budget is ~34K tokens per question; five retrieved passages
+// are ~2K. The whole document is only worth that when the question is genuinely
+// about the document as a whole.
+pref("alwaysRetrieve", true);
 
 // ---- storage -------------------------------------------------------
 // Write conversations into a child note on the paper (syncs with the library).

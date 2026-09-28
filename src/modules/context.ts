@@ -463,12 +463,19 @@ export async function buildContext(
   options: BuildContextOptions,
 ): Promise<ContextBundle> {
   const { itemID, selection } = options;
-  const wantFullText = options.fullText ?? Boolean(getPref("sendFullText"));
+  const fullTextRequested = options.fullText ?? Boolean(getPref("sendFullText"));
   const wantAnnotations =
     options.annotations ?? Boolean(getPref("sendAnnotations"));
 
+  // The document is fetched when any source needs it. Retrieval needs the
+  // untruncated text, which `getPaperText` keeps in `raw`.
+  const needsDocument =
+    fullTextRequested ||
+    Boolean(getPref("sendNearby")) ||
+    Boolean(getPref("retrievePassages")) ||
+    Boolean(options.rawText);
   let paperText = options.paperText ?? null;
-  if (!paperText && (wantFullText || Boolean(getPref("sendNearby")))) {
+  if (!paperText && needsDocument) {
     paperText = await getPaperText(itemID);
   }
 
@@ -501,41 +508,59 @@ export async function buildContext(
     }
   }
 
+  const retrievalOn =
+    getPref("retrievePassages") && Boolean(paperText?.chars) && Boolean(options.rawText);
+  const overBudget = Boolean(paperText?.truncated);
+
+  // Decide between sending the document and searching it.
+  //
+  // Sending a truncated document is the worst of both: full cost, minus the
+  // middle. So when the text does not fit, retrieval replaces it — the reader
+  // keeps the ability to ask about any chapter while paying for a few passages
+  // instead of a whole book. `sendFullText` still forces the document through
+  // when the reader explicitly wants it.
+  // `alwaysRetrieve` lets the reader prefer a few focused passages over the
+  // whole document even when the document would fit: 35K tokens versus 3K for
+  // the same question, and the retrieved passages are the relevant ones.
+  const preferRetrieval = Boolean(getPref("alwaysRetrieve"));
+  const wantFullText =
+    fullTextRequested && !overBudget && !(preferRetrieval && retrievalOn);
+
   if (wantFullText && paperText?.chars) {
     bundle.fullText = paperText.text;
-    bundle.fullTextTruncated = paperText.truncated;
-    bundle.summary.push(paperText.truncated ? "全文（已截断）" : "全文");
+    bundle.fullTextTruncated = false;
+    bundle.summary.push("全文");
   }
 
-  // When the document did not fit, search it instead of giving up on the parts
-  // that were cut. The query is the selected passage, not the question:
-  // questions are usually Chinese while the document is English, so the
-  // question alone would retrieve nothing.
-  if (getPref("retrievePassages") && paperText?.chars) {
+  // Search when the document did not fit, or when it was not requested at all
+  // but the reader asked about a long document anyway.
+  if (retrievalOn && !wantFullText) {
     const raw = options.rawText ?? "";
-    if (raw && raw.length > (paperText.text?.length ?? 0)) {
-      const exclude = locatePassage(raw, selection) ?? undefined;
-      const hits = rankChunks(raw, selection, {
-        topK: Number(getPref("retrieveTopK")) || 5,
-        excludeRange: exclude,
-      });
-      if (hits.length) {
-        bundle.retrieved = formatRetrieved(hits, raw.length);
-        bundle.summary.push(`检索 ${hits.length} 段`);
-        Zotero.debug(
-          `[Highlight Ask] retrieved ${hits.length} passage(s) from ${raw.length} chars`,
-        );
-      }
+    const exclude = locatePassage(raw, selection) ?? undefined;
+    const hits = rankChunks(raw, selection, {
+      topK: Number(getPref("retrieveTopK")) || 5,
+      excludeRange: exclude,
+    });
+    if (hits.length) {
+      bundle.retrieved = formatRetrieved(hits, raw.length);
+      bundle.summary.push(`检索 ${hits.length} 段`);
+      Zotero.debug(
+        `[Highlight Ask] retrieved ${hits.length} passage(s) from ${raw.length} chars` +
+          ` (overBudget=${overBudget}, fullTextRequested=${fullTextRequested})`,
+      );
+    } else if (overBudget) {
+      bundle.summary.push("检索无命中");
     }
   }
 
-  if (getPref("sendSI")) {
-    bundle.supportingInfo = await getSupportingInfo(itemID);
-    if (bundle.supportingInfo.length) {
-      const names = bundle.supportingInfo.map((d) => d.name).join("、");
-      bundle.summary.push(`SI ${bundle.supportingInfo.length} 份`);
-      Zotero.debug(`[Highlight Ask] SI attached: ${names}`);
-    }
+  if (fullTextRequested && overBudget) {
+    // Be explicit rather than silently sending less than asked for.
+    const note = bundle.retrieved
+      ? preferRetrieval
+        ? "按设置改为检索相关段落"
+        : "全文过长，改为检索相关段落"
+      : "全文过长，未能检索到相关段落";
+    bundle.summary.push(note);
   }
 
   // Rough per-source sizes, so the panel can show what a question will cost.
