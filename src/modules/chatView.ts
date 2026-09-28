@@ -1,4 +1,10 @@
-import { streamChat, DeepSeekError, type ChatMessage } from "./deepseek";
+import {
+  streamChat,
+  DeepSeekError,
+  makeAbortController,
+  canAbort,
+  type ChatMessage,
+} from "./deepseek";
 import {
   buildFollowUpMessages,
   buildInitialMessages,
@@ -211,9 +217,11 @@ export function createChatView(options: ChatViewOptions): ChatView {
 
   function setBusy(next: boolean) {
     busy = next;
-    sendBtn.textContent = next ? "停止" : "发送";
-    sendBtn.title = next ? "停止生成" : "发送";
-    sendBtn.classList.toggle("ha-chat-stop", next);
+    // Only advertise "stop" when the environment can actually abort.
+    const stoppable = next && canAbort();
+    sendBtn.textContent = next ? (stoppable ? "停止" : "生成中…") : "发送";
+    sendBtn.title = stoppable ? "停止生成" : next ? "正在生成" : "发送";
+    sendBtn.classList.toggle("ha-chat-stop", stoppable);
     input.disabled = next;
   }
 
@@ -397,7 +405,10 @@ export function createChatView(options: ChatViewOptions): ChatView {
       scrollToBottom();
     };
 
-    abort = new AbortController();
+    // Zotero's plugin sandbox has no AbortController. Without one the request
+    // still runs; only cancellation is unavailable.
+    const abortHandle = makeAbortController();
+    abort = abortHandle?.controller ?? null;
     setBusy(true);
 
     const startedAt = Date.now();
@@ -406,7 +417,7 @@ export function createChatView(options: ChatViewOptions): ChatView {
     try {
       const result = await streamChat({
         messages,
-        signal: abort.signal,
+        signal: abortHandle?.signal,
         onDelta: (full) => {
           firstTokenMs ??= Date.now() - startedAt;
           answerBody.classList.remove("ha-chat-streaming");
@@ -607,7 +618,11 @@ export function createChatView(options: ChatViewOptions): ChatView {
   });
   sendBtn.addEventListener("click", () => {
     if (busy) {
-      abort?.abort();
+      if (!abort) {
+        flash(sendBtn, "无法中断");
+        return;
+      }
+      abort.abort();
       return;
     }
     submit();

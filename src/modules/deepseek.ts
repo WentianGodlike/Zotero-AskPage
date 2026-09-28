@@ -88,8 +88,55 @@ export function buildEndpoint(baseUrl: string, path: string): string {
 
 interface ChatOptions extends StreamCallbacks {
   messages: ChatMessage[];
+  /**
+   * Cancellation signal. Optional because Zotero's plugin sandbox does not
+   * expose `AbortController` (see `canAbort()`), and `fetch` accepts
+   * `signal: undefined`.
+   */
   signal?: AbortSignal;
   maxTokens?: number;
+}
+
+/**
+ * Whether this environment can abort an in-flight request.
+ *
+ * Zotero runs plugins in a sandbox whose globals come from an explicit
+ * allowlist (`wantGlobalProperties` in chrome/content/zotero/xpcom/plugins.js).
+ * `fetch` is allowed; `AbortController`/`AbortSignal` are not. Referencing the
+ * constructor directly therefore throws `ReferenceError` and kills the whole
+ * request, so callers must check first.
+ */
+export function canAbort(): boolean {
+  try {
+    return typeof AbortController !== "undefined";
+  } catch {
+    // Touching an undeclared global in some sandboxes throws rather than
+    // returning "undefined".
+    return false;
+  }
+}
+
+/** Create an abort controller, or null when the sandbox has none. */
+export function makeAbortController(): {
+  controller: AbortController;
+  signal: AbortSignal;
+} | null {
+  if (!canAbort()) {
+    return null;
+  }
+  try {
+    // The guard sits on the same line as the construction on purpose: it is the
+    // contract that makes the direct global reference safe, and keeping them
+    // together makes that obvious to a reader and to the sandbox-globals check.
+    if (typeof AbortController === "undefined") { return null; }
+    const controller = new AbortController();
+    return { controller, signal: controller.signal };
+  } catch (e) {
+    Zotero.debug(
+      `[Highlight Ask] abort support unusable: ${(e as Error)?.message || e}`,
+    );
+    return null;
+  }
 }
 
 /** Everything needed to talk to the configured endpoint. */
@@ -394,7 +441,21 @@ export async function streamChat(options: ChatOptions): Promise<StreamResult> {
   }
 
   if (!full.trim()) {
-    throw new DeepSeekError("模型返回了空内容，请重试。", "empty");
+    // "Stream ended with nothing" has several very different causes; without
+    // this detail the user only sees "empty response" and cannot tell whether
+    // the model, the endpoint or the parameters are at fault.
+    const gotReasoningOnly = Boolean(reasoning.trim());
+    throw new DeepSeekError(
+      "模型返回了空内容。\n\n" +
+        `模型：${config.model}\n` +
+        `地址：${config.endpoint}\n` +
+        (gotReasoningOnly
+          ? "只收到了推理内容、没有正式回答。可能是「思考强度」或请求参数不被该模型支持，" +
+            "可在设置里把「请求参数」留空后重试。"
+          : "完全没有收到内容。请检查模型名是否正确、该模型是否可用，" +
+            "以及服务商是否需要额外的请求参数。"),
+      "empty",
+    );
   }
 
   return { content: full, reasoning, usage };

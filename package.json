@@ -1,7 +1,7 @@
 {
   "name": "zotero-highlight-ask",
   "type": "module",
-  "version": "0.4.2",
+  "version": "0.4.3",
   "description": "Highlight text in Zotero PDF reader and ask DeepSeek to explain it.",
   "config": {
     "addonName": "Highlight Ask",
@@ -22,7 +22,7 @@
   "license": "AGPL-3.0-or-later",
   "scripts": {
     "start": "zotero-plugin serve",
-    "build": "zotero-plugin build && tsc --noEmit && python3 scripts/check-manifest.py && python3 scripts/check-pane.py && python3 scripts/check-package.py",
+    "build": "zotero-plugin build && tsc --noEmit && python3 scripts/check-sandbox-globals.py && python3 scripts/check-manifest.py && python3 scripts/check-pane.py && python3 scripts/check-package.py",
     "lint:check": "prettier --check . && eslint .",
     "lint:fix": "prettier --write . && eslint . --fix",
     "release": "zotero-plugin release",
@@ -34,7 +34,8 @@
     "check:manifest": "python3 scripts/check-manifest.py",
     "check:pane": "python3 scripts/check-pane.py",
     "diagnose": "node scripts/diagnose-pane.mjs",
-    "check:package": "python3 scripts/check-package.py"
+    "check:package": "python3 scripts/check-package.py",
+    "check:sandbox": "python3 scripts/check-sandbox-globals.py"
   },
   "dependencies": {
     "zotero-plugin-toolkit": "^5.1.0-beta.13"
