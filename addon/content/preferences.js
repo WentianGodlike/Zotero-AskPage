@@ -236,6 +236,152 @@
   }
 
   /* ---------------------------------------------------------------- */
+  /* Prompt editor                                                     */
+  /* ---------------------------------------------------------------- */
+
+  /**
+   * The prompt catalogue lives in the plugin bundle, so the editor is built from
+   * data rather than hardcoded fields — the defaults in the code and the labels
+   * here can never disagree.
+   */
+  function promptFieldDefs() {
+    var a = api();
+    if (a && typeof a.promptFields === "function") {
+      return a.promptFields();
+    }
+    return [];
+  }
+
+  function renderPromptFields() {
+    var host = $("prompt-fields");
+    if (!host) {
+      return;
+    }
+    var defs = promptFieldDefs();
+    host.replaceChildren();
+
+    if (!defs.length) {
+      var note = document.createElement("div");
+      note.className = "desc warn";
+      note.textContent =
+        "读不到提示词定义（插件可能还没加载完成）。重启 Zotero 后再打开本页即可编辑。";
+      host.appendChild(note);
+      return;
+    }
+
+    defs.forEach(function (f) {
+      var wrap = document.createElement("div");
+      wrap.className = "field";
+
+      var label = document.createElement("label");
+      label.setAttribute("for", "prompt-" + f.prefKey);
+      label.textContent = f.label;
+
+      var help = document.createElement("div");
+      help.className = "desc";
+      help.textContent = f.help || "";
+
+      var area = document.createElement("textarea");
+      area.id = "prompt-" + f.prefKey;
+      area.rows = f.rows || 4;
+      area.spellcheck = false;
+      // Empty means "use the built-in default", so show the default as the
+      // placeholder rather than as a value — that keeps the two states distinct.
+      area.placeholder = f.default || "";
+      var saved = readPref(f.prefKey, "");
+      area.value = typeof saved === "string" ? saved : "";
+
+      var row = document.createElement("div");
+      row.style.display = "flex";
+      row.style.gap = "8px";
+      row.style.alignItems = "center";
+      row.style.marginBottom = "4px";
+
+      var reset = document.createElement("button");
+      reset.type = "button";
+      reset.className = "tiny";
+      reset.textContent = "恢复默认";
+      reset.addEventListener("click", function () {
+        area.value = "";
+        area.placeholder = f.default || "";
+        setStatus("已恢复「" + f.label + "」的默认值，点保存生效。");
+      });
+
+      row.appendChild(label);
+      row.appendChild(reset);
+
+      wrap.appendChild(row);
+      wrap.appendChild(area);
+      wrap.appendChild(help);
+      host.appendChild(wrap);
+    });
+  }
+
+  function resetAllPrompts() {
+    promptFieldDefs().forEach(function (f) {
+      var el = $("prompt-" + f.prefKey);
+      if (el) {
+        el.value = "";
+      }
+    });
+    setStatus("所有提示词已恢复默认，点保存生效。");
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* Data location + log stats                                         */
+  /* ---------------------------------------------------------------- */
+
+  function paintDataDir() {
+    var el = $("data-dir-desc");
+    if (!el) {
+      return;
+    }
+    var a = api();
+    var dir = a && typeof a.dataDir === "function" ? a.dataDir() : "";
+    el.textContent = dir
+      ? "结构化的副本，便于以后做历史面板或导出。位置：" + dir
+      : "结构化的副本，便于以后做历史面板或导出。";
+  }
+
+  async function paintLogStats() {
+    var el = $("log-stats");
+    if (!el) {
+      return;
+    }
+    var a = api();
+    if (!a || typeof a.summarizeLog !== "function") {
+      el.textContent = "（插件未就绪，无法读取统计）";
+      return;
+    }
+    try {
+      var s = await a.summarizeLog();
+      if (!s.requests) {
+        el.textContent = "（尚无记录）";
+        return;
+      }
+      var bits = [
+        s.requests + " 次调用",
+        s.totalTokens.toLocaleString() + " tokens",
+        "平均 " + s.avgTotalMs + "ms",
+      ];
+      if (s.avgFirstTokenMs !== null) {
+        bits.push("首字 " + s.avgFirstTokenMs + "ms");
+      }
+      if (s.errors) {
+        bits.push(s.errors + " 次失败");
+      }
+      var models = Object.keys(s.byModel)
+        .map(function (k) {
+          return k + " ×" + s.byModel[k].requests;
+        })
+        .join("，");
+      el.textContent = bits.join(" · ") + (models ? "（" + models + "）" : "");
+    } catch (e) {
+      el.textContent = "统计读取失败：" + ((e && e.message) || e);
+    }
+  }
+
+  /* ---------------------------------------------------------------- */
   /* Load / save                                                       */
   /* ---------------------------------------------------------------- */
 
@@ -256,6 +402,14 @@
     $("thinkingParams").value = String(readPref("thinkingParams", ""));
     $("temperature").value = String(readPref("temperature", ""));
     $("showReasoning").checked = Boolean(readPref("showReasoning", true));
+    $("sendNearby").checked = Boolean(readPref("sendNearby", true));
+    $("sendFullText").checked = Boolean(readPref("sendFullText", false));
+    $("fullTextMaxChars").value = String(readPref("fullTextMaxChars", 120000));
+    $("saveToNote").checked = Boolean(readPref("saveToNote", true));
+    $("saveToJson").checked = Boolean(readPref("saveToJson", true));
+    $("logRequests").checked = Boolean(readPref("logRequests", true));
+    renderPromptFields();
+    paintDataDir();
 
     var provider = providerByKey(key);
     // Fields that were never saved fall back to the preset.
@@ -330,6 +484,26 @@
     writePref("thinkingParams", v.thinkingParamsText);
     writePref("temperature", v.temperatureText);
     writePref("showReasoning", $("showReasoning").checked);
+    writePref("sendNearby", $("sendNearby").checked);
+    writePref("sendFullText", $("sendFullText").checked);
+    writePref("saveToNote", $("saveToNote").checked);
+    writePref("saveToJson", $("saveToJson").checked);
+    writePref("logRequests", $("logRequests").checked);
+
+    var maxChars = Number($("fullTextMaxChars").value.trim());
+    if (!isFinite(maxChars) || maxChars < 1000) {
+      setStatus("全文长度上限需要是不小于 1000 的数字", "error");
+      return false;
+    }
+    writePref("fullTextMaxChars", maxChars);
+
+    // Prompts: store the raw text (empty string means "use the default").
+    promptFieldDefs().forEach(function (f) {
+      var el = $("prompt-" + f.prefKey);
+      if (el) {
+        writePref(f.prefKey, el.value);
+      }
+    });
 
     if (!silent) {
       if (result.warnings && result.warnings.length) {
@@ -506,11 +680,13 @@
     $("btn-models").addEventListener("click", function () {
       fetchModels();
     });
+    $("btn-reset-prompts").addEventListener("click", resetAllPrompts);
   }
 
   function start() {
     try {
       init();
+      void paintLogStats();
     } catch (e) {
       // Never fail silently: a blank pane with no log is impossible to debug.
       Zotero.logError(

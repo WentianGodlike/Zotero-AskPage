@@ -22,24 +22,24 @@ const SCRIPT = resolve(
   import.meta.dirname ?? ".",
   "../addon/content/preferences.js",
 );
+const MARKUP = resolve(
+  import.meta.dirname ?? ".",
+  "../addon/content/preferences.xhtml",
+);
 
-const ELEMENT_IDS = [
-  "provider",
-  "apiKey",
-  "baseUrl",
-  "model",
-  "thinkingParams",
-  "temperature",
-  "showReasoning",
-  "status",
-  "provider-desc",
-  "key-desc",
-  "model-desc",
-  "model-list",
-  "btn-save",
-  "btn-test",
-  "btn-models",
-];
+/**
+ * Read the element ids straight out of the real markup.
+ *
+ * Hardcoding this list means the tests silently go stale whenever a field is
+ * added — the stub returns null for the new id and every test fails for the
+ * wrong reason. Deriving it from the markup keeps the harness honest.
+ */
+function elementIdsFromMarkup(): string[] {
+  const html = readFileSync(MARKUP, "utf8");
+  return [...html.matchAll(/id="([^"]+)"/g)].map((m) => m[1]);
+}
+
+const ELEMENT_IDS = elementIdsFromMarkup();
 
 /**
  * Run the pane script in a fake Zotero preference window.
@@ -343,5 +343,35 @@ export default function register(test) {
       /HIGHLIGHT_ASK_PROVIDERS/.test(src),
       "pane no longer falls back to the generated catalogue",
     );
+  });
+
+  test("every element the script looks up exists in the markup", () => {
+    // A missing id means a null dereference at init, which (before the
+    // try/catch) left the pane blank with no visible reason.
+    const src = readFileSync(SCRIPT, "utf8");
+    const markup = readFileSync(MARKUP, "utf8");
+    const defined = new Set(elementIdsFromMarkup());
+
+    const looked = new Set([
+      ...[...src.matchAll(/\$\("([^"]+)"\)/g)].map((m) => m[1]),
+      ...[...src.matchAll(/getElementById\("([^"]+)"\)/g)].map((m) => m[1]),
+    ]);
+
+    const missing = [...looked].filter((id) => !defined.has(id));
+    assert.deepEqual(missing, [], `script looks up ids absent from the markup: ${missing}`);
+
+    // Dynamic ids built as "prompt-" + prefKey cannot be checked statically;
+    // assert the container those live in is present.
+    assert.ok(defined.has("prompt-fields"), "prompt editor container is missing");
+  });
+
+  test("every id in the markup is reachable (no dead fields)", () => {
+    // Guards the opposite mistake: markup left behind after a field is removed.
+    const src = readFileSync(SCRIPT, "utf8");
+    const defined = elementIdsFromMarkup();
+    const orphans = defined.filter(
+      (id) => !src.includes(`"${id}"`) && !src.includes(`'${id}'`) && !src.includes(`prompt-`),
+    );
+    assert.deepEqual(orphans, [], `markup defines ids the script never touches: ${orphans}`);
   });
 }

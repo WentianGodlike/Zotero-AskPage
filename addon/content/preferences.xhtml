@@ -193,6 +193,98 @@
       </div>
     </fieldset>
 
+    <fieldset>
+      <legend>上下文与存储</legend>
+
+      <div class="field">
+        <div class="check">
+          <input id="sendNearby" type="checkbox" />
+          <label for="sendNearby" style="font-weight: 400; margin: 0">
+            附带选中片段前后的原文
+          </label>
+        </div>
+        <div class="desc">
+          公式依赖的定义常常就在上一段。开销很小，建议开着。
+        </div>
+      </div>
+
+      <div class="field">
+        <div class="check">
+          <input id="sendFullText" type="checkbox" />
+          <label for="sendFullText" style="font-weight: 400; margin: 0">
+            面板里的「全文」开关默认打开
+          </label>
+        </div>
+        <div class="desc">
+          全文取自 Zotero 已建立的索引，不必重新解析 PDF。费用明显更高，
+          建议默认关闭、按需在面板里临时打开。
+        </div>
+      </div>
+
+      <div class="field">
+        <label for="fullTextMaxChars">全文长度上限（字符）</label>
+        <input id="fullTextMaxChars" type="text" style="max-width: 200px" />
+        <div class="desc">
+          超过则保留开头和结尾、截掉中间（论文的摘要与结论通常最有用）。
+        </div>
+      </div>
+
+      <div class="field">
+        <div class="check">
+          <input id="saveToNote" type="checkbox" />
+          <label for="saveToNote" style="font-weight: 400; margin: 0">
+            把问答存为该文献的 Zotero 笔记
+          </label>
+        </div>
+        <div class="desc">
+          随文献同步、可全文检索、可直接编辑。<b>这是主要存档。</b>
+        </div>
+      </div>
+
+      <div class="field">
+        <div class="check">
+          <input id="saveToJson" type="checkbox" />
+          <label for="saveToJson" style="font-weight: 400; margin: 0">
+            同时镜像一份 JSON
+          </label>
+        </div>
+        <div class="desc" id="data-dir-desc">
+          结构化的副本，便于以后做历史面板或导出。
+        </div>
+      </div>
+    </fieldset>
+
+    <fieldset>
+      <legend>提示词</legend>
+      <div class="field">
+        <div class="desc">
+          分三层：角色 → 阅读场景 → 任务。留空表示使用内置默认值。
+          <button id="btn-reset-prompts" class="tiny" type="button" style="margin-left: 8px">
+            全部恢复默认
+          </button>
+        </div>
+      </div>
+      <div id="prompt-fields"></div>
+    </fieldset>
+
+    <fieldset>
+      <legend>调用日志</legend>
+      <div class="field">
+        <div class="check">
+          <input id="logRequests" type="checkbox" />
+          <label for="logRequests" style="font-weight: 400; margin: 0">
+            记录每次调用的元数据
+          </label>
+        </div>
+        <div class="desc">
+          只记时间、模型、token 数、耗时、是否出错。<b>不记录论文内容和 AI 回答。</b>
+        </div>
+      </div>
+      <div class="field">
+        <div id="log-stats" class="desc">（尚无记录）</div>
+      </div>
+    </fieldset>
+
     <details class="advanced">
       <summary>高级：请求参数（JSON）</summary>
       <div class="field">
