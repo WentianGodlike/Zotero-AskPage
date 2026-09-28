@@ -1947,11 +1947,56 @@ test("stripFontFaces leaves the layout rules behind", () => {
   assert.ok(out.includes(".mord"));
 });
 
-test("font URLs stay relative rather than naming Zotero's hashed files", () => {
+test("font URLs are made absolute against the addon", () => {
+  // A relative URL inside an injected <style> resolves against the document
+  // URL, not the stylesheet's location, so `../assets/fonts/x.woff2` looked for
+  // the font beside the reader page and never found it. Missing fonts are what
+  // make super/subscripts look cramped.
+  const base = "resource://highlight-ask/assets/fonts/";
   const css = '@font-face{src:url(../assets/fonts/a.woff2) format("woff2")}';
-  const out = keepWoff2FontFaces(css);
-  assert.ok(out.includes("../assets/fonts/a.woff2"), out);
-  assert.ok(!out.includes("resource://"), out);
+  const out = keepWoff2FontFaces(css, base);
+  assert.ok(out.includes(`${base}a.woff2`), out);
+});
+
+test("every relative spelling normalises to the same absolute URL", () => {
+  const base = "resource://highlight-ask/assets/fonts/";
+  const want = `${base}a.woff2`;
+  for (const url of [
+    "../assets/fonts/a.woff2",
+    "fonts/a.woff2",
+    "assets/fonts/a.woff2",
+    "a.woff2",
+  ]) {
+    const out = keepWoff2FontFaces(
+      `@font-face{src:url(${url}) format("woff2")}`,
+      base,
+    );
+    assert.ok(out.includes(want), `${url} -> ${out}`);
+    assert.ok(!out.includes("/assets/fonts/assets"), `doubled path: ${out}`);
+  }
+});
+
+test("absolute and data URLs are left alone", () => {
+  const base = "resource://highlight-ask/assets/fonts/";
+  for (const url of [
+    "https://cdn.example/a.woff2",
+    "data:font/woff2;base64,AAAA",
+    "resource://other/a.woff2",
+  ]) {
+    const out = keepWoff2FontFaces(
+      `@font-face{src:url(${url}) format("woff2")}`,
+      base,
+    );
+    assert.ok(out.includes(url), `${url} was rewritten: ${out}`);
+  }
+});
+
+test("the woff fallback is dropped even when it comes first", () => {
+  const css =
+    '@font-face{src:url(fonts/a.woff) format("woff"),url(fonts/a.woff2) format("woff2")}';
+  const out = keepWoff2FontFaces(css, "resource://x/assets/fonts/");
+  assert.ok(out.includes("a.woff2"), out);
+  assert.ok(!out.includes("a.woff)"), out);
 });
 
 console.log("\nabort capability");
