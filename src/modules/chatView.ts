@@ -476,6 +476,10 @@ export function createChatView(options: ChatViewOptions): ChatView {
     if (wantScreenshot && lastImageCount > 0) {
       bits.push(`截图 ${lastImageCount} 张`);
     }
+    if (archiveWarning) {
+      contextLine.textContent += ` · ⚠ ${archiveWarning}`;
+      contextLine.classList.add("ha-chat-warn");
+    }
     if (lastContext) {
       const { tokens } = bundleSize(lastContext);
       const imageTokens = estimateImageTokens(lastImageCount);
@@ -510,6 +514,40 @@ export function createChatView(options: ChatViewOptions): ChatView {
   let lastContext: ContextBundle | null = null;
   /** Tiles attached to the most recent question, for the status line. */
   let lastImageCount = 0;
+  /** Set when a session could not be archived, so the panel can say so. */
+  let archiveWarning = "";
+
+  /**
+   * Assemble context, then send — never leaving the reader with nothing.
+   *
+   * `assembleContext` talks to Zotero (items, notes, the full-text index) and
+   * can fail for reasons outside this view's control. It was previously called
+   * as `void assembleContext().then(...)`, so a rejection produced an unhandled
+   * promise and the question was silently never sent: the reader pressed send
+   * and nothing happened. Falling back to a context-free question is strictly
+   * better — the model still has the selection.
+   */
+  function askWithContext(
+    send: (ctx: Parameters<typeof buildInitialMessages>[2]) => void,
+  ) {
+    assembleContext()
+      .then((ctx) => send(ctx))
+      .catch((e) => {
+        Zotero.logError(
+          new Error(
+            `[Highlight Ask] context assembly failed, asking without it: ${
+              (e as Error)?.message || e
+            }`,
+          ),
+        );
+        showHint(
+          `上下文组装失败，已改为只发送选中片段。${
+            (e as Error)?.message || e
+          }`,
+        );
+        send({ title: session?.title });
+      });
+  }
 
   /**
    * Turn the stashed capture into attachments, if there is one.
@@ -831,12 +869,26 @@ export function createChatView(options: ChatViewOptions): ChatView {
       });
       session.turns = updated.turns;
       session.updatedAt = updated.updatedAt;
-      await persistSession(session);
+      const outcome = await persistSession(session);
+      // Archiving failures used to be silent. Losing a conversation the reader
+      // believed was saved is worth a visible warning; the answer itself is
+      // already on screen, so this never blocks.
+      archiveWarning =
+        outcome.note === "failed" && !outcome.json
+          ? "会话未能存档（笔记与 JSON 均写入失败）"
+          : outcome.note === "failed"
+            ? "笔记写入失败，已存 JSON 镜像"
+            : outcome.note === "skipped" && !outcome.json
+              ? "会话未存档（笔记与 JSON 写入均已关闭）"
+              : "";
       hooks?.onTurnArchived?.(session);
+      paintContextLine();
     } catch (e) {
-      Zotero.debug(
-        `[Highlight Ask] archiving failed: ${(e as Error)?.message || e}`,
+      archiveWarning = `会话存档异常：${(e as Error)?.message || e}`;
+      Zotero.logError(
+        new Error(`[Highlight Ask] archiving failed: ${(e as Error)?.message || e}`),
       );
+      paintContextLine();
     }
   }
 
@@ -853,7 +905,7 @@ export function createChatView(options: ChatViewOptions): ChatView {
     resizeInput();
 
     if (history.length === 0) {
-      void assembleContext().then((ctx) => {
+      askWithContext((ctx) => {
         const messages = buildInitialMessages(seedSelection, text, ctx);
         history = messages;
         void ask(messages, text, { text });
@@ -1109,7 +1161,7 @@ export function createChatView(options: ChatViewOptions): ChatView {
     input.value = seedQuestion;
     input.focus();
   } else if (seedQuestion) {
-    void assembleContext().then((ctx) => {
+    askWithContext((ctx) => {
       const messages = buildInitialMessages(seedSelection, seedQuestion, ctx);
       history = messages;
       void ask(messages, seedQuestion, { text: seedQuestion });
@@ -1132,7 +1184,7 @@ export function createChatView(options: ChatViewOptions): ChatView {
         return;
       }
       // First question of this session: assemble the full context first.
-      void assembleContext().then((ctx) => {
+      askWithContext((ctx) => {
         const messages = buildInitialMessages(seedSelection, question, ctx);
         history = messages;
         void ask(messages, question, { text: question });
