@@ -742,9 +742,16 @@ export function createChatView(options: ChatViewOptions): ChatView {
         }
         const path = await saveShot(shot.dataUrl);
         flash(shotBtn, `${shot.width}×${shot.height}`);
+        // Warn when the crop is a passage rather than a formula: the model
+        // downscales wide images, so an embedded formula can end up unreadable
+        // while the text version would have worked.
+        const advice = outcome.looksLikeFormula
+          ? ""
+          : "\n提示：这段选区看起来是成段文字。截图会被缩小，其中的公式可能反而不清楚——" +
+            "划选单个公式再截效果最好。";
         showHint(
-          `已保存 ${shot.width}×${shot.height} 到：${path ?? "（未能写盘）"}\n${outcome.detail}`,
-          path ? "ok" : "warn",
+          `已保存 ${shot.width}×${shot.height} 到：${path ?? "（未能写盘）"}\n${outcome.detail}${advice}`,
+          path ? (outcome.looksLikeFormula ? "ok" : "warn") : "warn",
         );
         return;
       }
