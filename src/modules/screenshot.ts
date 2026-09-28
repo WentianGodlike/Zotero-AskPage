@@ -131,23 +131,63 @@ export function unionRects(rects: Rect[]): Rect | null {
  * the wrapper picks the current one rather than the stale buffer.
  */
 export function findPageCanvas(node: Node): HTMLCanvasElement | null {
-  let el: Node | null = node;
-  while (el && (el as HTMLElement).tagName !== "DIV") {
-    el = el.parentNode;
+  // The document that actually holds the rendered page.
+  const doc = (node as any)?.ownerDocument as Document | undefined;
+  if (!doc) {
+    return null;
   }
-  let scope = el as HTMLElement | null;
-  // Walk up looking for the page container that holds both layers.
-  for (let i = 0; i < 6 && scope; i++) {
-    const wrapper = scope.querySelector?.(".canvasWrapper");
-    if (wrapper) {
-      const canvases = wrapper.querySelectorAll("canvas");
-      if (canvases.length) {
-        return canvases[canvases.length - 1] as unknown as HTMLCanvasElement;
+
+  const pickLatest = (wrapper: Element | null): HTMLCanvasElement | null => {
+    if (!wrapper) {
+      return null;
+    }
+    const canvases = wrapper.querySelectorAll("canvas");
+    // PDF.js keeps a previous canvas around for double buffering; the last one
+    // is the page currently shown.
+    return canvases.length
+      ? (canvases[canvases.length - 1] as unknown as HTMLCanvasElement)
+      : null;
+  };
+
+  // 1. The wrapper nearest the selection. Zotero's reader is a patched PDF.js,
+  //    so building on its layer names here is a guess.
+  try {
+    let el: Element | null =
+      (node as Element)?.nodeType === 1
+        ? (node as Element)
+        : ((node as Node).parentElement as Element | null);
+    for (let hops = 0; hops < 20 && el; hops++) {
+      const wrapper = el.closest?.(".canvasWrapper") || el.querySelector?.(".canvasWrapper");
+      const found = pickLatest(wrapper ?? null);
+      if (found) {
+        return found;
+      }
+      el = el.parentElement;
+    }
+  } catch {
+    /* fall through to the document-wide search */
+  }
+
+  // 2. Document-wide: independent of the DOM layout, so a reader that nests
+  //    things differently still works. Requires the page to have a non-trivial
+  //    canvas, which rules out the reader's UI canvases.
+  try {
+    const all = doc.querySelectorAll(".canvasWrapper canvas, canvas");
+    const plausible: HTMLCanvasElement[] = [];
+    for (let i = 0; i < all.length; i++) {
+      const c = all[i] as HTMLCanvasElement;
+      if (c.width >= 200 && c.height >= 200) {
+        plausible.push(c);
       }
     }
-    // Zotero's type definitions widen `parentElement` to `Element`.
-    scope = scope.parentElement as HTMLElement | null;
+    if (plausible.length) {
+      // Prefer the largest: the rendered page dwarfs any icon canvas.
+      return plausible.sort((a, b) => b.width * b.height - a.width * a.height)[0];
+    }
+  } catch {
+    /* nothing usable */
   }
+
   return null;
 }
 
@@ -314,13 +354,55 @@ export function captureSelection(
 /* ------------------------------------------------------------------ */
 
 /**
- * Find the non-empty selection, searching into child frames.
+ * Find the non-empty selection in any open reader.
  *
- * The panel lives in the reader's window while the PDF is rendered inside a
- * nested frame, so the outermost `getSelection()` is always empty. The frame
- * holding the text is found by walking inwards and keeping the first non-empty
- * selection. Same-process frames are directly reachable; a cross-origin frame
- * throws on access and is skipped.
+ * The panel runs in the reader's outer window while the PDF lives in the
+ * reader's own frame, so the selection has to be fetched from that frame. The
+ * reliable way is through the reader instance — `Zotero.Reader._readers` holds
+ * every open reader and each one references its frame directly. Walking
+ * `window.frames` instead means guessing the nesting depth, which did not work.
+ *
+ * Readers are checked newest-first: the one the user is looking at is the most
+ * likely to hold a live selection.
+ */
+export function findReaderSelection(): {
+  selection: Selection | null;
+  readerItemID?: number;
+  source: string;
+} {
+  try {
+    const readers: any[] =
+      (Zotero as any).Reader?._readers || [];
+    for (let i = readers.length - 1; i >= 0; i--) {
+      const reader = readers[i];
+      try {
+        const win = reader?._iframeWindow;
+        if (!win) {
+          continue;
+        }
+        const sel = win.getSelection?.();
+        if (sel && sel.rangeCount && String(sel.toString() || "").trim()) {
+          return {
+            selection: sel as Selection,
+            readerItemID: reader.itemID,
+            source: `reader#${i} itemID=${reader.itemID}`,
+          };
+        }
+      } catch {
+        /* a reader frame that is gone or not accessible */
+      }
+    }
+    return { selection: null, source: `no reader selection (${readers.length} readers)` };
+  } catch (e) {
+    return { selection: null, source: `reader lookup failed: ${(e as Error)?.message || e}` };
+  }
+}
+
+/**
+ * Fallback: search child frames from a window.
+ *
+ * Kept for the case where the reader list is unavailable (an older Zotero, or a
+ * host other than the reader). Secondary to `findReaderSelection`.
  */
 export function findAnySelection(win: Window | null, depth = 0): Selection | null {
   if (!win || depth > 6) {
@@ -341,7 +423,6 @@ export function findAnySelection(win: Window | null, depth = 0): Selection | nul
       let child: Window;
       try {
         child = frames[i] as Window;
-        // Touching a cross-origin frame's document throws; skip it.
         void child.document;
       } catch {
         continue;
@@ -355,6 +436,22 @@ export function findAnySelection(win: Window | null, depth = 0): Selection | nul
     /* frames unavailable */
   }
   return null;
+}
+
+/** Best available selection: reader first, frame walk second. */
+export function locateSelection(win: Window | null): {
+  selection: Selection | null;
+  source: string;
+} {
+  const viaReader = findReaderSelection();
+  if (viaReader.selection) {
+    return { selection: viaReader.selection, source: viaReader.source };
+  }
+  const viaFrames = findAnySelection(win);
+  return {
+    selection: viaFrames,
+    source: viaFrames ? "frame walk" : viaReader.source,
+  };
 }
 
 /* ------------------------------------------------------------------ */

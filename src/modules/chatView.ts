@@ -11,7 +11,7 @@ import { installKatexStyles, renderMathInto } from "./katex";
 import {
   captureSelectionToFile,
   describeGeometry,
-  findAnySelection,
+  locateSelection,
 } from "./screenshot";
 import { getPref } from "../utils/prefs";
 import { getPaperText, describePaperText, type PaperText } from "./fulltext";
@@ -715,16 +715,21 @@ export function createChatView(options: ChatViewOptions): ChatView {
 
   shotBtn.addEventListener("click", () => {
     void (async () => {
-      // The panel sits in the reader's window, but the PDF is rendered inside a
-      // nested frame — so the selection must be searched for, not read off the
-      // panel's own window.
-      const selection = findAnySelection(readerWindowRef());
-      const report = describeGeometry(selection as Selection | null);
-      Zotero.debug(`[Highlight Ask] capture geometry: ${report.text}`);
+      // The panel sits in the reader's outer window while the PDF is in the
+      // reader's own frame, so the selection comes from the reader instance.
+      const located = locateSelection(readerWindowRef());
+      const selection = located.selection;
+      const report = describeGeometry(selection);
+      Zotero.debug(
+        `[Highlight Ask] capture geometry: ${report.text} (via ${located.source})`,
+      );
 
       if (!report.ok) {
         // Say *what* is missing. "截不到" alone cannot be acted on.
-        showHint(`截图失败：没有找到${labelForMissing(report.missing)}。${report.text}`);
+        showHint(
+          `截图失败：没有找到${labelForMissing(report.missing)}。` +
+            `${report.text}（选区来源：${located.source}）`,
+        );
         flash(shotBtn, "截不到");
         return;
       }
