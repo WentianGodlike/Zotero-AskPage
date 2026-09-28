@@ -1,6 +1,10 @@
 import { QUICK_ACTIONS, resolveTaskPrompt } from "./prompts";
 import { askInSidebar, anyViewMounted } from "./sidebar";
-import { captureGeometry, stashPendingCapture } from "./screenshot";
+import {
+  captureGeometry,
+  searchSelectionDeep,
+  stashPendingCapture,
+} from "./screenshot";
 
 /**
  * Reader integration: add buttons to Zotero's text-selection popup.
@@ -215,34 +219,45 @@ function dismissSelectionPopup(doc: Document): void {
 function stashCaptureFromReader(reader: ReaderInstance): void {
   // Always stash an outcome, failures included: this handler is the only place
   // that runs while the selection is still alive, so it is also the only place
-  // that can report *why* a capture is impossible. Without that, the panel can
-  // only say "nothing was captured".
+  // that can report *why* a capture is impossible.
+  //
+  // The reader's `_iframeWindow` is `reader.html` (the React shell), and the PDF
+  // viewer sits deeper inside it, so the selection is searched for across the
+  // whole frame subtree. The trace is carried into the failure message: previous
+  // attempts failed because the nesting was assumed instead of observed.
+  const itemID = reader?.itemID;
   try {
     const win = reader?._iframeWindow;
-    const sel = win?.getSelection?.();
-    if (!sel || !sel.rangeCount) {
+    if (!win) {
+      stashPendingCapture(
+        { ok: false, step: "selection", detail: "reader 没有 _iframeWindow" },
+        itemID,
+      );
+      return;
+    }
+
+    const search = searchSelectionDeep(win as unknown as Window);
+    if (!search.selection) {
       stashPendingCapture(
         {
           ok: false,
           step: "selection",
-          detail: `弹窗时 reader 选区为空 (iframeWindow=${win ? "有" : "无"})`,
+          detail: `弹窗时各 frame 均无选区。探测：${search.trace}`,
         },
-        reader?.itemID,
+        itemID,
       );
       return;
     }
+
+    const outcome = captureGeometry(search.selection);
     stashPendingCapture(
-      captureGeometry(sel as unknown as Selection),
-      reader?.itemID,
+      outcome.ok ? outcome : { ...outcome, detail: `${outcome.detail}｜探测：${search.trace}` },
+      itemID,
     );
   } catch (e) {
     stashPendingCapture(
-      {
-        ok: false,
-        step: "selection",
-        detail: `异常: ${(e as Error)?.message || e}`,
-      },
-      reader?.itemID,
+      { ok: false, step: "selection", detail: `异常: ${(e as Error)?.message || e}` },
+      itemID,
     );
   }
 }
