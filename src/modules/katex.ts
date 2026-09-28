@@ -203,26 +203,50 @@ export function parseHtmlToMathNodes(html: string): MathNode {
  * dropped because only woff2 is bundled — leaving them would produce 404s on
  * every formula.
  */
-export function keepWoff2FontFaces(css: string): string {
+export function keepWoff2FontFaces(css: string, fontBase?: string): string {
   const out: string[] = [];
   for (const raw of css.split("}")) {
     const block = raw.trim();
     if (!block || !/^@font-face\b/i.test(block)) {
       continue;
     }
-    // Keep the whole rule, but only its woff2 source entries.
-    const kept = block
-      .split(",")
-      .filter((part, index) => {
-        if (index === 0) {
-          // The first comma-separated piece still holds the declaration head
-          // (for example `@font-face{font-family:...;src:url(fonts/x.woff2)`).
-          return true;
-        }
-        return /woff2/i.test(part);
-      })
-      .join(",");
-    out.push(kept + "}");
+
+    // Drop the woff and ttf sources rather than keeping "the first entry":
+    // publishers order the `src` list differently, and only woff2 is shipped,
+    // so any other format is a guaranteed 404.
+    let rule = block.replace(
+      /url\(\s*(['"]?)([^'")]+)\1\s*\)(\s*format\(\s*['"]?(?:woff|truetype)['"]?\s*\))?/gi,
+      (match, _q, url: string, format?: string) => {
+        const isWoff2 = /woff2/i.test(url) || /woff2/i.test(format ?? "");
+        return isWoff2 ? match : "";
+      },
+    );
+
+    if (fontBase) {
+      // A relative URL inside an injected <style> resolves against the
+      // *document* URL, not the stylesheet's location, so `../assets/fonts/x`
+      // looked for the font beside the reader page and never found it. Missing
+      // fonts are what make super/subscripts render cramped.
+      rule = rule.replace(
+        /url\(\s*(['"]?)([^'")]+)\1\s*\)/gi,
+        (_m, _q, url: string) =>
+          `url(${
+            /^(data:|https?:|resource:|chrome:|jar:)/i.test(url)
+              ? url
+              : fontBase + url.replace(/^(\.\.\/)*(assets\/)?(fonts\/)?/, "")
+          })`,
+      );
+    }
+
+    // Tidy the separators left behind by removed entries: a dangling comma is
+    // harmless in CSS but made the generated rules look malformed in review.
+    rule = rule
+      .replace(/,\s*,/g, ",")
+      .replace(/(src:\s*),/i, "$1")
+      .replace(/,\s*$/, "")
+      .replace(/\{\s*,/g, "{");
+
+    out.push(rule + "}");
   }
   return out.join("\n");
 }
@@ -292,7 +316,10 @@ export async function installKatexStyles(
     // Fonts first, then layout. Both are needed: without the font faces KaTeX
     // falls back to a system serif and the maths glyphs render flat, which
     // looks like a broken formula rather than a missing font.
-    addStyle(doc, FONT_STYLE_ID, keepWoff2FontFaces(css));
+    // `rootURI` ends with a slash, so this yields
+    // resource://<addon>/assets/fonts/KaTeX_Main-Regular.woff2
+    const fontBase = `${rootURI.replace(/\/?$/, "/")}assets/fonts/`;
+    addStyle(doc, FONT_STYLE_ID, keepWoff2FontFaces(css, fontBase));
     addStyle(doc, LAYOUT_STYLE_ID, stripFontFaces(css));
     return true;
   } catch (e) {
