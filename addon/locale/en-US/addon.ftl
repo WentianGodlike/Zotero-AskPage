@@ -1,6 +1,6 @@
 highlightask-name = Highlight Ask
 
-highlight-ask-pane-header =
+pane-header =
     .label = AI Assistant
-highlight-ask-pane-sidenav =
+pane-sidenav =
     .tooltiptext = Highlight Ask

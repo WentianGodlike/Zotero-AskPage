@@ -3,6 +3,6 @@
 /* eslint-disable */
 // @ts-nocheck
 export type FluentMessageId =
-  | 'highlight-ask-pane-header'
-  | 'highlight-ask-pane-sidenav'
-  | 'highlightask-name';
+  | 'highlightask-name'
+  | 'pane-header'
+  | 'pane-sidenav';
