@@ -34,7 +34,12 @@ import {
 import { HIGHLIGHT_ASK_PROVIDERS } from "../src/data/providers.data";
 import { validateSettings, getProvider } from "../src/modules/providers";
 import { matchesItem } from "../src/modules/sidebar";
-import { htmlToText, formatAnnotations } from "../src/modules/context";
+import {
+  htmlToText,
+  formatAnnotations,
+  looksLikeSupportingInfo,
+  bundleSize,
+} from "../src/modules/context";
 import {
   decodeEntities,
   parseHtmlToMathNodes,
@@ -1091,6 +1096,87 @@ test("a throwing Zotero.Items.get degrades to no match", () => {
   } finally {
     (globalThis as any).Zotero.Items.get = original;
   }
+});
+
+console.log("\nlooksLikeSupportingInfo");
+// Patterns taken from a real library. Mistaking the article for SI would send
+// the wrong document; mistaking SI for the article loses the derivations.
+test("recognises the publishers' actual SI filenames", () => {
+  for (const name of [
+    "ma3c01377_si_001.pdf", // ACS
+    "advs10440-sup-0001-suppmat.pdf", // Wiley
+    "supporting information.pdf",
+    "paper_SI_v2.pdf",
+    "SI_1.pdf",
+    "paper_ESI.pdf", // RSC
+    "1-s2.0-S0009261420308812-mmc1.pdf", // Elsevier supplementary
+    "appendix.pdf",
+  ]) {
+    assert.equal(looksLikeSupportingInfo(name), true, `should be SI: ${name}`);
+  }
+});
+
+test("does not mistake the article for SI", () => {
+  for (const name of [
+    "Sun 等 - 2026 - Advanced Multifunctional Vitrimer-Based Composites.pdf",
+    "UnderstandingDeepLearning_02_09_26_C.pdf",
+    "1-s2.0-S0009261420308812-main.pdf",
+    "高等代数 上册 第二版.pdf",
+    "paper.pdf",
+    // Real false positive from a library: the title ends in a standalone "Si".
+    // Matching a bare "si" token sent the article itself as Supporting
+    // Information, which is the dangerous direction of error.
+    "Shafe 等 - 2024 - Identification and Design of Better Diamine-Hardened Epoxy-Based Thermoset Shape Memory Polymers Si.pdf",
+    "Kanduč 等 - 2024 - Molecular dynamics simulations as support for experimental studies.pdf",
+  ]) {
+    assert.equal(looksLikeSupportingInfo(name), false, `should NOT be SI: ${name}`);
+  }
+});
+
+test("does not fire on words that merely contain the letters", () => {
+  // "situ", "simple", "design" all contain "si" but are not SI.
+  for (const name of ["situ_synthesis.pdf", "simple_model.pdf", "design.pdf"]) {
+    assert.equal(looksLikeSupportingInfo(name), false, `false positive: ${name}`);
+  }
+});
+
+test("handles paths, extensions and empty input", () => {
+  assert.equal(looksLikeSupportingInfo("storage:abc/paper_si_001.pdf"), true);
+  assert.equal(looksLikeSupportingInfo(""), false);
+  assert.equal(looksLikeSupportingInfo("   "), false);
+});
+
+console.log("\nbundleSize");
+test("estimates tokens from character counts", () => {
+  const bundle = {
+    selection: "x",
+    annotations: [],
+    notes: [],
+    fullTextTruncated: false,
+    supportingInfo: [],
+    summary: [],
+    sizes: [{ label: "选中片段", chars: 300 }],
+  };
+  assert.equal(bundleSize(bundle as any).tokens, 100);
+});
+
+test("sums the parts and keeps the breakdown", () => {
+  const bundle = {
+    selection: "x",
+    annotations: [],
+    notes: [],
+    fullTextTruncated: false,
+    supportingInfo: [],
+    summary: [],
+    sizes: [
+      { label: "选中片段", chars: 300 },
+      { label: "全文", chars: 3000 },
+    ],
+  };
+  const r = bundleSize(bundle as any);
+  assert.equal(r.tokens, 1100);
+  assert.equal(r.parts.length, 2);
+  assert.equal(r.parts[1].label, "全文");
 });
 
 console.log("\nhtmlToText (notes)");
