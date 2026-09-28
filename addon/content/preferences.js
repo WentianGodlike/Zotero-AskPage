@@ -403,6 +403,7 @@
     $("temperature").value = String(readPref("temperature", ""));
     $("showReasoning").checked = Boolean(readPref("showReasoning", true));
     $("sendNearby").checked = Boolean(readPref("sendNearby", true));
+    $("sendAnnotations").checked = Boolean(readPref("sendAnnotations", true));
     $("sendFullText").checked = Boolean(readPref("sendFullText", false));
     $("fullTextMaxChars").value = String(readPref("fullTextMaxChars", 120000));
     $("saveToNote").checked = Boolean(readPref("saveToNote", true));
@@ -485,6 +486,7 @@
     writePref("temperature", v.temperatureText);
     writePref("showReasoning", $("showReasoning").checked);
     writePref("sendNearby", $("sendNearby").checked);
+    writePref("sendAnnotations", $("sendAnnotations").checked);
     writePref("sendFullText", $("sendFullText").checked);
     writePref("saveToNote", $("saveToNote").checked);
     writePref("saveToJson", $("saveToJson").checked);
