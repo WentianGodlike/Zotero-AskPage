@@ -230,6 +230,31 @@ def check_prompt_defaults() -> list[str]:
     return problems
 
 
+# Zotero API members that do NOT exist, with the correct replacement.
+#
+# These are worse than missing globals: `obj.missing?.()` is valid JavaScript,
+# so the call silently yields undefined and the feature looks enabled while
+# doing nothing. That is exactly how the full-text feature broke — it called
+# `attachment.getText()`, which is not on Zotero.Item, and sent nothing for
+# weeks without a single error.
+BOGUS_ZOTERO_MEMBERS: dict[str, str] = {
+    "getText": "use the `attachmentText` property (extracts on demand when unindexed)",
+}
+
+
+def check_bogus_zotero_members(root: "Path") -> list[str]:
+    problems: list[str] = []
+    for path in sorted(root.glob("src/**/*.ts")):
+        text = strip_comments(path.read_text(encoding="utf-8"))
+        for line_no, line in enumerate(text.split("\n"), 1):
+            for bogus, replacement in BOGUS_ZOTERO_MEMBERS.items():
+                if re.search(rf"\.{bogus}\b", line):
+                    problems.append(
+                        f"{path}:{line_no}  Zotero.Item has no `{bogus}` — {replacement}"
+                    )
+    return problems
+
+
 def main() -> int:
     problems: list[tuple[str, int, str, str]] = []
     checked = 0
@@ -269,6 +294,14 @@ def main() -> int:
             checked += 1
 
     prompt_problems = check_prompt_defaults()
+    # Calls to Zotero members that do not exist. These are silent: `obj.x?.()`
+    # is valid JavaScript, so a mistyped API name yields undefined and the
+    # feature appears to work while sending nothing.
+    from pathlib import Path as _Path
+
+    root = _Path(SRC_DIR).resolve().parent
+    prompt_problems.extend(check_bogus_zotero_members(root))
+
     for msg in prompt_problems:
         print(f"FAIL: {msg}")
 
@@ -297,7 +330,11 @@ def main() -> int:
         if hint:
             print(f"      → {hint}")
 
-    print(f"\n{len(seen)} problem(s)")
+    # `prompt_problems` are reported above but are not part of `seen`, so
+    # counting only `seen` printed the misleading "0 problem(s)" next to real
+    # failures.
+    total = len(seen) + len(prompt_problems)
+    print(f"\n{total} problem(s)")
     return 1
 
 

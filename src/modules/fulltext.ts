@@ -5,7 +5,7 @@ import { getPref } from "../utils/prefs";
  * Full-text retrieval.
  *
  * Zotero already indexes PDF attachments, so the text is usually available from
- * its cache without re-parsing anything — `attachment.getText()` returns the
+ * its cache without re-parsing anything — `attachment.attachmentText` returns the
  * indexed full text. That makes "attach the whole paper" cheap enough to offer
  * as a per-question toggle.
  *

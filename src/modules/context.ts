@@ -387,15 +387,17 @@ export async function getSupportingInfo(
           "",
       );
 
-      // Reading the text is also what we need if it *is* SI, so there is no
-      // wasted work either way.
-      const indexed = attachment as unknown as { getText?: () => Promise<string> };
+      // Reading the text serves both purposes: it is what identifies SI (by its
+      // own declaration) and what gets sent. `attachmentText` is the supported
+      // accessor — an earlier version called `getText()`, which does not exist
+      // on Zotero.Item, so the optional call silently produced nothing and SI
+      // detection fell back to filenames for every document.
       let raw = "";
       try {
-        raw = (await indexed.getText?.()) || "";
+        raw = (await (attachment as any).attachmentText) || "";
       } catch (e) {
         Zotero.debug(
-          `[Highlight Ask] getText failed for ${attachment.id}: ${
+          `[Highlight Ask] attachmentText failed for SI candidate ${attachment.id}: ${
             (e as Error)?.message || e
           }`,
         );
