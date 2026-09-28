@@ -272,8 +272,46 @@ export function createChatView(options: ChatViewOptions): ChatView {
     return renderMathInto(doc, container, latex, display);
   };
 
+  /**
+   * Render maths and flag the ones too wide for the panel.
+   *
+   * A horizontal scrollbar only appears while scrolling on some platforms, so
+   * an overflowing formula looks truncated with no hint that there is more.
+   * Measuring after layout and marking the element makes the state visible:
+   * the reader sees that the formula continues, and the stylesheet can show a
+   * persistent bar.
+   */
+  const renderMathFlaggingOverflow = (
+    el: HTMLElement,
+    latex: string,
+    display: boolean,
+  ): boolean => {
+    const ok = renderMath(el, latex, display);
+    if (ok && display) {
+      // Measure after the element is in the document.
+      const check = () => {
+        try {
+          const overflows = el.scrollWidth > el.clientWidth + 1;
+          el.classList.toggle("ha-math-overflow", overflows);
+          if (overflows) {
+            Zotero.debug(
+              `[Highlight Ask] formula overflows: ${el.scrollWidth} > ${el.clientWidth}`,
+            );
+          }
+        } catch {
+          /* measuring is best-effort */
+        }
+      };
+      // `setTimeout` rather than `requestAnimationFrame`: the plugin sandbox
+      // does not expose rAF, and the check only needs to run after layout.
+      setTimeout(check, 0);
+      setTimeout(check, 80);
+    }
+    return ok;
+  };
+
   /** Markdown options used everywhere in this view. */
-  const mdOptions: RenderOptions = { renderMath };
+  const mdOptions: RenderOptions = { renderMath: renderMathFlaggingOverflow };
 
   function removeEmptyState() {
     empty.remove();
@@ -1398,6 +1436,16 @@ const CSS = `
 }
 .ha-chat .ha-math-block.ha-math-rendered::-webkit-scrollbar-thumb:hover {
   background: #9c88d8;
+}
+/* A formula wider than the panel. The script adds this class after measuring,
+   because an overlay scrollbar is invisible until the reader scrolls — which
+   they will not do if nothing suggests there is more to see. */
+.ha-chat .ha-math-overflow {
+  padding-bottom: 14px;
+  box-shadow: inset -14px 0 12px -12px rgba(47, 111, 235, 0.45);
+}
+.ha-chat .ha-math-overflow::-webkit-scrollbar-track {
+  background: #ddd3f5;
 }
 /* KaTeX's display mode centres with a full-width block; inside a scroller that
    pushes the left edge out of reach, so let the content size itself. */
