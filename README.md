@@ -163,6 +163,31 @@ JSONL 格式意味着可以直接 `jq`、`grep`，或拖进表格软件算成本
 
 
 
+## 公式渲染
+
+回答里的 `$...$` / `$$...$$` 会真正排版出来，而不是显示 LaTeX 源码。
+
+**没有打包 KaTeX**：Zotero 为笔记编辑器自带了 KaTeX 的样式与字体，插件直接复用
+（约 50 KB 的 CSS + 20 个 woff2 字体），因此 XPI 体积没有明显增加，字形也与
+Zotero 其余部分一致。
+
+两个实现细节：
+
+- Zotero 的 `editor.css` 里还混着 ProseMirror 和笔记编辑器的样式，
+  **必须过滤**，否则会污染阅读器面板。过滤 + 字体路径重写见
+  `extractKatexCss()`，有单测覆盖。
+- 字体在 CSS 里是**相对路径**，注入到阅读器文档后会被解析到错误位置，
+  所以统一改写成 `resource://zotero/note-editor/...` 绝对路径。
+  字体文件名带**内容哈希**（Zotero 升级就会变），因此不能硬编码。
+
+渲染器是自写的 LaTeX 子集引擎（`src/modules/katex.ts`），支持分式、根号、
+上下标、希腊字母、常用运算符、求和/积分及其上下限、`\text` 等。
+**不是 TeX 引擎**：遇到不认识的命令会原样显示，而不是猜——宁可露出源码，
+也不给出一个看起来很确定但错误的符号。上下标优先用 Unicode 上/下标字符
+（`x²`、`xᵢ`），没有对应字符时才用 CSS 位移。
+
+若样式表加载失败，数学会退回成等宽的 LaTeX 源码块，而不是空白。
+
 ## 关于 DeepSeek 模型的选择
 
 这两个是当前在售的（价格单位：每 1M tokens，非高峰价为高峰价一半）：
@@ -248,6 +273,7 @@ src/
     deepseek.ts          流式 API 客户端（SSE 分块缓冲 + 参数不支持时自动重试）
     providers.ts         厂商预设查询 + 配置校验（可单测）
     markdown.ts          Markdown → DOM，保护 $公式$，零 innerHTML
+    katex.ts             复用 Zotero 的 KaTeX 样式；LaTeX 子集渲染器（节点树输出）
     prompts.ts           三层提示词、上下文拼装、全文截断（可单测）
     fulltext.ts          读 Zotero 已索引的全文（带缓存）
     notes.ts             会话模型：Zotero 笔记渲染 + JSON 镜像

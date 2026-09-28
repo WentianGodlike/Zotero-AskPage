@@ -10,7 +10,8 @@ import {
   buildInitialMessages,
   extractNearby,
 } from "./prompts";
-import { renderMarkdown } from "./markdown";
+import { renderMarkdown, type RenderOptions } from "./markdown";
+import { installKatexStyles, renderMathInto } from "./katex";
 import { getPref } from "../utils/prefs";
 import { getPaperText, describePaperText, type PaperText } from "./fulltext";
 import {
@@ -178,6 +179,24 @@ export function createChatView(options: ChatViewOptions): ChatView {
     convo.scrollTop = convo.scrollHeight;
   }
 
+  /**
+   * Math renderer passed to the Markdown pipeline.
+   *
+   * Returns false when there is nothing to render, which makes the pipeline
+   * fall back to showing the LaTeX source rather than an empty box.
+   */
+  const renderMath: NonNullable<RenderOptions["renderMath"]> = (
+    container,
+    latex,
+    display,
+  ) => {
+    container.classList.toggle("ha-math-display", display);
+    return renderMathInto(doc, container, latex, display);
+  };
+
+  /** Markdown options used everywhere in this view. */
+  const mdOptions: RenderOptions = { renderMath };
+
   function removeEmptyState() {
     empty.remove();
   }
@@ -330,7 +349,7 @@ export function createChatView(options: ChatViewOptions): ChatView {
         }
         if (turn.answer) {
           const { body } = appendBubble("assistant", "");
-          body.replaceChildren(renderMarkdown(turn.answer, doc));
+          body.replaceChildren(renderMarkdown(turn.answer, doc, mdOptions));
           const meta = doc.createElement("div");
           meta.className = "ha-chat-meta";
           meta.textContent = turn.model ? `${turn.model}` : "";
@@ -421,7 +440,7 @@ export function createChatView(options: ChatViewOptions): ChatView {
         onDelta: (full) => {
           firstTokenMs ??= Date.now() - startedAt;
           answerBody.classList.remove("ha-chat-streaming");
-          answerBody.replaceChildren(renderMarkdown(full, doc));
+          answerBody.replaceChildren(renderMarkdown(full, doc, mdOptions));
           scrollToBottom();
         },
         onReasoning: renderReasoning,
@@ -635,6 +654,9 @@ export function createChatView(options: ChatViewOptions): ChatView {
   paintFullTextBtn();
   paintContextLine();
   setQuote(seedSelection);
+  // Fetch Zotero's KaTeX stylesheet once; until it lands, math still renders
+  // (with the fallback chip styling) rather than breaking.
+  void installKatexStyles(doc);
   void loadPaperText().then(() => loadPreviousSession());
 
   if (options.manual && seedQuestion) {
@@ -920,6 +942,45 @@ const CSS = `
   white-space: pre;
 }
 .ha-chat .ha-code-lang { position: absolute; top: 4px; right: 8px; font-size: 10px; color: #a8b0bd; }
+
+/* ---- math: our own layout classes on top of Zotero's KaTeX CSS ---- */
+.ha-chat .katex { font-size: 1.06em; }
+.ha-chat .mfrac {
+  display: inline-flex;
+  flex-direction: column;
+  vertical-align: middle;
+  text-align: center;
+  margin: 0 .18em;
+}
+.ha-chat .mfrac-num {
+  border-bottom: 1px solid currentColor;
+  padding: 0 .25em .05em;
+}
+.ha-chat .mfrac-den { padding: .05em .25em 0; }
+.ha-chat .msqrt { white-space: nowrap; }
+.ha-chat .msqrt-inner {
+  border-top: 1px solid currentColor;
+  padding: 0 .18em;
+  margin-left: .08em;
+}
+.ha-chat .mop { font-style: normal; padding: 0 .12em; }
+.ha-chat .mtext { font-style: normal; }
+/* Inline math keeps a light chip so it stands out from prose. */
+.ha-chat .ha-math-inline.ha-math-rendered {
+  background: none;
+  border: 0;
+  padding: 0;
+  font-family: inherit;
+  color: inherit;
+}
+/* Display math gets breathing room. */
+.ha-chat .ha-math-display { display: block; text-align: center; }
+.ha-chat .ha-math-block.ha-math-rendered {
+  background: none;
+  border: 0;
+  color: inherit;
+  font-family: inherit;
+}
 
 .ha-chat .ha-math-inline {
   font-family: "SFMono-Regular", Consolas, monospace;
