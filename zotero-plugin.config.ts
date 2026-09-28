@@ -52,12 +52,35 @@ export default defineConfig({
       },
       {
         // KaTeX's stylesheet, emitted as a file rather than imported so the
-        // runtime can rewrite its @font-face URLs to Zotero's copies before
-        // injecting it. Fonts themselves are NOT shipped — Zotero has them.
+        // runtime can trim its @font-face rules to the woff2 fonts we ship.
+        // The fonts live in addon/assets/fonts and are copied to
+        // content/fonts below, so the relative `fonts/...` URLs resolve.
         entryPoints: ["node_modules/katex/dist/katex.min.css"],
         loader: { ".css": "copy" },
         bundle: false,
         outfile: ".scaffold/build/addon/content/katex.css",
+        // The stylesheet sits at content/katex.css while the shipped fonts are
+        // at assets/fonts, so the relative URLs need one level up. Doing it here
+        // keeps the runtime free of path rewriting.
+        plugins: [
+          {
+            name: "repoint-katex-fonts",
+            setup(build: any) {
+              build.onEnd(async () => {
+                const fs = await import("node:fs");
+                const file = ".scaffold/build/addon/content/katex.css";
+                if (!fs.existsSync(file)) {
+                  return;
+                }
+                const css = fs.readFileSync(file, "utf8");
+                fs.writeFileSync(
+                  file,
+                  css.replace(/url\(fonts\//g, "url(../assets/fonts/"),
+                );
+              });
+            },
+          },
+        ],
       },
     ],
   },
