@@ -44,6 +44,12 @@ pref("siMaxChars", 200000);
 pref("sendFullText", false);
 // Character budget for the full text when it is attached.
 pref("fullTextMaxChars", 120000);
+// For documents too long to send whole, search them and send the passages most
+// similar to the selection. The query is the selection, not the question:
+// questions are usually Chinese while the documents are English.
+pref("retrievePassages", true);
+// How many passages to retrieve.
+pref("retrieveTopK", 5);
 
 // ---- storage -------------------------------------------------------
 // Write conversations into a child note on the paper (syncs with the library).
