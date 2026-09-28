@@ -1,5 +1,6 @@
 import { QUICK_ACTIONS, resolveTaskPrompt } from "./prompts";
 import { askInSidebar, anyViewMounted } from "./sidebar";
+import { captureGeometry, stashPendingCapture } from "./screenshot";
 
 /**
  * Reader integration: add buttons to Zotero's text-selection popup.
@@ -114,6 +115,13 @@ function onRenderTextSelectionPopup(event: any): void {
       return;
     }
 
+    // Resolve the crop region now, while the selection is alive.
+    //
+    // Clicking into the sidebar clears the PDF selection, so the reader has a
+    // live selection at this moment and none by the time a button is pressed.
+    // Stashing the geometry here is what makes a screenshot possible at all.
+    stashCaptureFromReader(reader);
+
     ensureButtonStyles(doc);
 
     const row = doc.createElement("div");
@@ -195,6 +203,28 @@ function dismissSelectionPopup(doc: Document): void {
     }
   } catch {
     /* ignore */
+  }
+}
+
+/**
+ * Resolve and stash the crop geometry for the reader's current selection.
+ *
+ * Uses the reader's own iframe window, which is the same reference Zotero hands
+ * the built-in selection popup — the one path known to hold the selection.
+ */
+function stashCaptureFromReader(reader: ReaderInstance): void {
+  try {
+    const win = reader?._iframeWindow;
+    const sel = win?.getSelection?.();
+    if (!sel || !sel.rangeCount) {
+      return;
+    }
+    const geometry = captureGeometry(sel as unknown as Selection);
+    if (geometry) {
+      stashPendingCapture(geometry, reader?.itemID);
+    }
+  } catch (e) {
+    Zotero.debug(`[Highlight Ask] stash failed: ${(e as Error)?.message || e}`);
   }
 }
 
