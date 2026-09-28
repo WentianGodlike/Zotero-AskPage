@@ -332,6 +332,7 @@ PDF 文本层不是给人用的。`normalizeSelection()` 处理三类噪声：
 | `check-manifest.py` | 构建目录的 manifest | `update_url` 为空等导致 Zotero 报「可能无法兼容」 |
 | `check-pane.py` | 设置页标记 | 按 **Zotero 的包装方式**解析；XML 声明、id 对不上 |
 | `check-package.py` | **打好的 XPI** | 代码引用了但没打进包的文件；Fluent 消息 id 是否真能解析 |
+| `check-sandbox-globals.py` | 源码 | 使用了 Zotero 插件沙箱**不提供**的浏览器 API |
 
 前三项看的是**构建目录**，最后一项看的是**真正会被加载的 XPI**。这个区别很关键：
 只要「构建目录里有、包里没有」，前三项全过，运行时才炸——而且只留一行控制台错误。
@@ -344,6 +345,13 @@ PDF 文本层不是给人用的。`normalizeSelection()` 处理三类噪声：
    `<addonRef>-<key>`，所以 Zotero 侧要传 `highlightask-pane-header` 而不是
    `pane-header`。**传错不报错**——界面只会把原始 id 当文字显示出来。
    现在由 `check-package.py` 交叉核对源码里的 `l10nID` 与包内 `.ftl`。
+
+3. **`AbortController` 在沙箱里不存在**。Zotero 用显式白名单
+   （`wantGlobalProperties`）构造插件作用域：`fetch` 在，`AbortController` /
+   `AbortSignal` 不在。直接 `new AbortController()` 会在运行时抛
+   `ReferenceError`，**把整个请求流程打断**，而日志里只有一行。
+   现在改为 `canAbort()` 能力检测 + 优雅降级：无法取消时不传 signal，
+   「停止」按钮相应不显示。检测见 `check-sandbox-globals.py`。
 
 ## 已知限制
 

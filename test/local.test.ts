@@ -19,7 +19,13 @@ import { resolve } from "node:path";
 
 import { normalizeSelection } from "../src/modules/readerPopup";
 import { buildInitialMessages, buildFollowUpMessages } from "../src/modules/prompts";
-import { buildEndpoint, DeepSeekError, parseThinkingParams } from "../src/modules/deepseek";
+import {
+  buildEndpoint,
+  DeepSeekError,
+  parseThinkingParams,
+  canAbort,
+  makeAbortController,
+} from "../src/modules/deepseek";
 import { renderMarkdown } from "../src/modules/markdown";
 import { HIGHLIGHT_ASK_PROVIDERS } from "../src/data/providers.data";
 import { validateSettings, getProvider } from "../src/modules/providers";
@@ -900,6 +906,38 @@ test("a throwing Zotero.Items.get degrades to no match", () => {
   } finally {
     (globalThis as any).Zotero.Items.get = original;
   }
+});
+
+console.log("\nabort capability");
+test("canAbort() reflects whether AbortController exists", () => {
+  // Node has it; Zotero's plugin sandbox does not.
+  assert.equal(canAbort(), typeof AbortController !== "undefined");
+});
+
+test("makeAbortController returns a usable pair when available", () => {
+  const handle = makeAbortController();
+  if (typeof AbortController === "undefined") {
+    assert.equal(handle, null);
+    return;
+  }
+  assert.ok(handle, "expected a controller in an environment that has one");
+  assert.equal(handle.signal.aborted, false);
+  handle.controller.abort();
+  assert.equal(handle.signal.aborted, true);
+});
+
+test("makeAbortController degrades instead of throwing when absent", () => {
+  // This is the Zotero case that broke the request outright: referencing the
+  // undefined global threw ReferenceError and no request was ever sent.
+  const original = (globalThis as any).AbortController;
+  delete (globalThis as any).AbortController;
+  try {
+    assert.equal(canAbort(), false);
+    assert.equal(makeAbortController(), null);
+  } finally {
+    (globalThis as any).AbortController = original;
+  }
+  assert.equal(canAbort(), true);
 });
 
 console.log("\npickSessionFiles");
