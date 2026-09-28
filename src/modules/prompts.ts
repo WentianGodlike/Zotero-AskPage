@@ -275,19 +275,24 @@ export function buildUserMessage(ctx: BuildContext): string {
         '\n"""',
     );
   }
-  if (ctx.annotations && ctx.annotations.trim()) {
+  if (typeof ctx.annotations === "string" && ctx.annotations.trim()) {
     parts.push(
       "读者在本文中做过的标注（高亮与批注，反映读者认为重要的地方）：\n" +
         ctx.annotations,
     );
   }
-  if (ctx.notes && ctx.notes.length) {
+  // Elements are filtered rather than trusted: a malformed entry used to reach
+  // the prompt as the string "undefined".
+  const notes = (Array.isArray(ctx.notes) ? ctx.notes : []).filter(
+    (n): n is string => typeof n === "string" && n.trim().length > 0,
+  );
+  if (notes.length) {
     parts.push(
       "读者自己写的笔记：\n" +
-        ctx.notes.map((n, i) => `【笔记 ${i + 1}】\n${n}`).join("\n\n"),
+        notes.map((n, i) => `【笔记 ${i + 1}】\n${n}`).join("\n\n"),
     );
   }
-  if (ctx.retrieved && ctx.retrieved.trim()) {
+  if (typeof ctx.retrieved === "string" && ctx.retrieved.trim()) {
     parts.push(
       "以下是从全文（太长，无法整篇附上）中检索出的相关段落。它们可能来自书中的" +
         "任何位置，不限于选中片段附近；需要跨章节回答时以此为依据：\n" +
@@ -296,8 +301,10 @@ export function buildUserMessage(ctx: BuildContext): string {
         '\n"""',
     );
   }
-  if (ctx.supportingInfo && ctx.supportingInfo.length) {
-    for (const si of ctx.supportingInfo) {
+  const siDocs = (Array.isArray(ctx.supportingInfo) ? ctx.supportingInfo : [])
+    .filter((d) => d && typeof d.text === "string" && d.text.trim());
+  if (siDocs.length) {
+    for (const si of siDocs) {
       parts.push(
         `以下是本文的 Supporting Information（${si.name}，同样来自 PDF 抽取）：\n` +
           '"""\n' +
@@ -306,7 +313,11 @@ export function buildUserMessage(ctx: BuildContext): string {
       );
     }
   }
-  if (ctx.nearby && ctx.nearby.trim() && ctx.nearby.trim() !== ctx.selection.trim()) {
+  if (
+    typeof ctx.nearby === "string" &&
+    ctx.nearby.trim() &&
+    ctx.nearby.trim() !== String(ctx.selection ?? "").trim()
+  ) {
     parts.push(
       "选中片段附近的原文（用于理解上下文）：\n" + '"""\n' + ctx.nearby + '\n"""',
     );
@@ -415,9 +426,24 @@ export function trimFullText(
   text: string,
   maxChars: number,
 ): { text: string; truncated: boolean } {
-  const clean = (text || "").trim();
+  const clean = typeof text === "string" ? text.trim() : "";
   if (!clean) {
     return { text: "", truncated: false };
+  }
+  // A malformed budget must not silently mangle the text: a negative budget used
+  // to return just the head slice (`"abc"` for `"abcdef"`) and a NaN budget
+  // produced the literal message "省略约 NaN 个字符". `Infinity` is legitimate —
+  // it means "no limit", which callers may pass for an unbounded document.
+  if (Number.isNaN(maxChars) || maxChars <= 0) {
+    return { text: "", truncated: true };
+  }
+  if (!Number.isFinite(maxChars)) {
+    return { text: clean, truncated: false };
+  }
+  // Too small to hold both ends plus the marker: sending a fragment would be
+  // more misleading than sending nothing.
+  if (maxChars < MIN_TRIM_BUDGET) {
+    return { text: clean.slice(0, Math.floor(maxChars)), truncated: true };
   }
   if (clean.length <= maxChars) {
     return { text: clean, truncated: false };
@@ -433,6 +459,9 @@ export function trimFullText(
     truncated: true,
   };
 }
+
+/** Below this, both ends plus the omission marker cannot fit. */
+const MIN_TRIM_BUDGET = 64;
 
 /**
  * Pick a window of the paper's text around the selection.
