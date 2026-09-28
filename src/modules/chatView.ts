@@ -11,6 +11,7 @@ import { installKatexStyles, renderMathInto } from "./katex";
 import {
   captureSelectionToFile,
   describeGeometry,
+  findAnySelection,
 } from "./screenshot";
 import { getPref } from "../utils/prefs";
 import { getPaperText, describePaperText, type PaperText } from "./fulltext";
@@ -130,6 +131,11 @@ export function createChatView(options: ChatViewOptions): ChatView {
   const convo = doc.createElement("div");
   convo.className = "ha-chat-convo";
 
+  // Inline feedback for actions with no visible result (capture, save).
+  const hint = doc.createElement("div");
+  hint.className = "ha-chat-hint";
+  hint.hidden = true;
+
   const empty = doc.createElement("div");
   empty.className = "ha-chat-empty";
   empty.append(
@@ -150,7 +156,7 @@ export function createChatView(options: ChatViewOptions): ChatView {
   inputRow.className = "ha-chat-input-row";
   inputRow.append(input, sendBtn);
 
-  root.append(head, quote, contextLine, convo, inputRow);
+  root.append(head, quote, contextLine, convo, hint, inputRow);
   container.appendChild(root);
 
   /* ---------------------------------------------------------------- */
@@ -709,26 +715,57 @@ export function createChatView(options: ChatViewOptions): ChatView {
 
   shotBtn.addEventListener("click", () => {
     void (async () => {
-      // The selection lives in the reader's own window, not this panel's.
-      const readerWindow = readerWindowRef();
-      const selection = readerWindow?.getSelection?.() ?? null;
-      const geometry = describeGeometry(selection as Selection | null);
-      Zotero.debug(`[Highlight Ask] capture geometry: ${geometry}`);
-      const result = await captureSelectionToFile(selection as Selection | null);
-      if (!result) {
+      // The panel sits in the reader's window, but the PDF is rendered inside a
+      // nested frame — so the selection must be searched for, not read off the
+      // panel's own window.
+      const selection = findAnySelection(readerWindowRef());
+      const report = describeGeometry(selection as Selection | null);
+      Zotero.debug(`[Highlight Ask] capture geometry: ${report.text}`);
+
+      if (!report.ok) {
+        // Say *what* is missing. "截不到" alone cannot be acted on.
+        showHint(`截图失败：没有找到${labelForMissing(report.missing)}。${report.text}`);
         flash(shotBtn, "截不到");
-        Zotero.debug(
-          `[Highlight Ask] capture failed. ${geometry}. ` +
-            "Likely the canvas or text layer was not found from the selection node.",
-        );
         return;
       }
-      flash(shotBtn, `${result.width}×${result.height}`);
-      Zotero.debug(
-        `[Highlight Ask] capture saved: ${result.path ?? "(not written)"} ${result.detail}`,
+
+      const result = await captureSelectionToFile(selection as Selection | null);
+      if (!result) {
+        showHint(`找到画布但裁剪失败（内容可能受保护）。${report.text}`);
+        flash(shotBtn, "裁剪失败");
+        return;
+      }
+      const shown = `${result.width}×${result.height}`;
+      flash(shotBtn, shown);
+      showHint(
+        `已保存 ${shown} 到：${result.path ?? "（未能写盘）"}`,
+        "ok",
       );
     })();
   });
+
+  /** Explain which lookup failed, in the user's terms. */
+  function labelForMissing(kind: string | undefined): string {
+    switch (kind) {
+      case "selection":
+        return "选中内容";
+      case "textLayer":
+        return "页面的文字层（textLayer）";
+      case "canvas":
+        return "页面的画布（canvasWrapper）";
+      case "rects":
+        return "可用的选区矩形";
+      default:
+        return "所需元素";
+    }
+  }
+
+  /** Show a short, dismissible note above the input. */
+  function showHint(message: string, kind: "info" | "ok" | "warn" = "warn") {
+    hint.textContent = message;
+    hint.className = `ha-chat-hint ha-chat-hint-${kind}`;
+    hint.hidden = false;
+  }
 
   input.addEventListener("input", resizeInput);
   input.addEventListener("keydown", (e: KeyboardEvent) => {
@@ -977,6 +1014,20 @@ const CSS = `
 .ha-chat-retry { margin-top: 8px; }
 
 .ha-chat-meta { font-size: 11px; color: #9aa3b0; margin: -6px 0 10px; }
+
+/* Inline feedback for actions that otherwise produce no visible result. */
+.ha-chat-hint {
+  flex: 0 0 auto;
+  padding: 6px 10px;
+  font-size: 11.5px;
+  line-height: 1.5;
+  word-break: break-all;
+  border-top: 1px solid var(--fill-quinary, #eef0f4);
+  background: var(--fill-quinary, #fbfbfd);
+  color: #8a5a00;
+}
+.ha-chat-hint-ok { color: #15803d; }
+.ha-chat-hint-info { color: #6b7280; }
 
 .ha-chat-reasoning {
   background: var(--fill-quinary, #f8f9fb);

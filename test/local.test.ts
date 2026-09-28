@@ -35,6 +35,7 @@ import { HIGHLIGHT_ASK_PROVIDERS } from "../src/data/providers.data";
 import { validateSettings, getProvider } from "../src/modules/providers";
 import { matchesItem } from "../src/modules/sidebar";
 import {
+  findAnySelection,
   scaleRectToCanvas,
   expandForFormula,
   clampRect,
@@ -1106,6 +1107,66 @@ test("a throwing Zotero.Items.get degrades to no match", () => {
   } finally {
     (globalThis as any).Zotero.Items.get = original;
   }
+});
+
+console.log("\nfindAnySelection");
+// The panel lives in the reader window while the PDF is in a nested frame, so
+// the outermost getSelection() is always empty.
+function fakeWindow(opts: {
+  text?: string;
+  children?: any[];
+  throwsOnDocument?: boolean;
+}) {
+  const win: any = {
+    frames: [],
+    getSelection: () => ({
+      rangeCount: opts.text ? 1 : 0,
+      toString: () => opts.text ?? "",
+    }),
+  };
+  if (opts.throwsOnDocument) {
+    Object.defineProperty(win, "document", {
+      get() {
+        throw new Error("cross-origin");
+      },
+    });
+  } else {
+    win.document = {};
+  }
+  win.frames = opts.children ?? [];
+  return win;
+}
+
+test("finds a selection in a child frame", () => {
+  const inner = fakeWindow({ text: "E = mc^2" });
+  const outer = fakeWindow({ text: "", children: [inner] });
+  assert.ok(findAnySelection(outer));
+});
+
+test("returns the outermost non-empty selection when there is one", () => {
+  const child = fakeWindow({ text: "child" });
+  const outer = fakeWindow({ text: "outer", children: [child] });
+  const found = findAnySelection(outer)!;
+  assert.equal(String(found.toString()), "outer");
+});
+
+test("skips a frame whose document throws", () => {
+  const bad = fakeWindow({ text: "hidden", throwsOnDocument: true });
+  const good = fakeWindow({ text: "visible" });
+  const outer = fakeWindow({ text: "", children: [bad, good] });
+  assert.ok(findAnySelection(outer));
+});
+
+test("returns null when nothing is selected", () => {
+  assert.equal(findAnySelection(fakeWindow({ text: "" })), null);
+  assert.equal(findAnySelection(null), null);
+});
+
+test("does not recurse forever", () => {
+  // A self-referencing frame list must terminate.
+  const outer = fakeWindow({ text: "" });
+  outer.frames = [outer];
+  assert.doesNotThrow(() => findAnySelection(outer, 0));
 });
 
 console.log("\nscreenshot geometry");
