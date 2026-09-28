@@ -1115,6 +1115,91 @@ test("a throwing Zotero.Items.get degrades to no match", () => {
   }
 });
 
+console.log("\nmarkdown: display maths keeps its display flag");
+// A `$$...$$` sitting inside a paragraph used to be reconstructed with
+// display:false, which renders sums and fractions at inline size — the "flat
+// formula" a reader notices immediately.
+function renderCalls(markdown: string) {
+  const calls: Array<{ latex: string; display: boolean }> = [];
+  const fakeDoc = {
+    createElement(tag: string) {
+      return {
+        tagName: tag.toUpperCase(),
+        className: "",
+        classList: { add() {}, contains: () => false, toggle() {} },
+        style: {},
+        dataset: {},
+        children: [] as any[],
+        attrs: {} as Record<string, string>,
+        setAttribute(k: string, v: string) {
+          this.attrs[k] = v;
+        },
+        appendChild(c: any) {
+          this.children.push(c);
+          return c;
+        },
+        replaceChildren() {},
+        set textContent(v: string) {
+          this._text = v;
+        },
+        get textContent() {
+          return this._text ?? "";
+        },
+      };
+    },
+    createTextNode(t: string) {
+      return { nodeValue: t, textContent: t };
+    },
+  } as unknown as Document;
+
+  renderMarkdown(markdown, fakeDoc, {
+    renderMath: (_el, latex, display) => {
+      calls.push({ latex, display });
+      return true;
+    },
+  });
+  return calls;
+}
+
+test("a display formula on its own line renders as display", () => {
+  const calls = renderCalls("$$x = y$$");
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].display, true);
+  assert.equal(calls[0].latex, "x = y");
+});
+
+test("a display formula inside a paragraph still renders as display", () => {
+  // This is the case that was broken: the paragraph path always passed false.
+  const calls = renderCalls("where the result is $$\\prod_{i=1}^{I} x_i$$ as shown.");
+  const display = calls.filter((c) => c.display);
+  assert.equal(
+    display.length,
+    1,
+    `expected one display call, got ${JSON.stringify(calls)}`,
+  );
+  assert.ok(display[0].latex.includes("prod"), display[0].latex);
+});
+
+test("inline maths stays inline", () => {
+  const calls = renderCalls("We write $x_i$ for the input.");
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].display, false);
+  assert.equal(calls[0].latex, "x_i");
+});
+
+test("inline and display maths in one line are distinguished", () => {
+  const calls = renderCalls("Let $\\phi$ be the parameter: $$p(\\phi) = \\frac{a}{b}$$ done.");
+  assert.equal(calls.length, 2);
+  assert.equal(calls[0].display, false);
+  assert.equal(calls[1].display, true);
+});
+
+test("bracket delimiters count as display", () => {
+  const calls = renderCalls("\\[x = y\\]");
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].display, true);
+});
+
 console.log("\nplanTiles");
 // The provider resamples every image to roughly 1300x1300 pixels and bills a
 // flat maximum per image, so a tile must stay inside that budget or the maths
