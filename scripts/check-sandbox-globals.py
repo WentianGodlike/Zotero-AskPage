@@ -28,6 +28,21 @@ guard, and flagging it would defeat the purpose.
 Run: python3 scripts/check-sandbox-globals.py
 Exit code 1 on any problem.
 """
+
+from __future__ import annotations
+
+import sys
+
+if sys.version_info < (3, 8):  # noqa: UP036
+    sys.exit(
+        "This script needs Python 3.8 or newer "
+        f"(running {sys.version.split()[0]})."
+    )
+
+# Deferred annotations: the builtin generics below (`list[str]`, `set[str]`)
+# are evaluated at definition time on Python < 3.9 unless annotations are
+# strings, which would break `npm run build` outright on those versions.
+
 import os
 import re
 import sys
@@ -104,7 +119,6 @@ KNOWN_MISSING_CAPS = {
     "NodeFilter": "not a DOM context",
 }
 
-
 def strip_comments(text: str) -> str:
     """Remove comments, including trailing ones.
 
@@ -118,7 +132,6 @@ def strip_comments(text: str) -> str:
     text = re.sub(r'(?m)(?<![:/])//(?![^"\n]*["\']\s*:).*$', "", text)
     return text
 
-
 def strip_string_literals(line: str) -> str:
     """Remove string and template contents.
 
@@ -130,7 +143,6 @@ def strip_string_literals(line: str) -> str:
     line = re.sub(r'"(?:[^"\\]|\\.)*"', '""', line)
     return line
 
-
 def strip_type_positions(line: str) -> str:
     """Remove substrings that are TypeScript type syntax, not runtime code."""
     # `as Foo`, `<Foo>`, `: Foo` (annotation), `implements Foo`, `extends Foo`
@@ -139,7 +151,6 @@ def strip_type_positions(line: str) -> str:
     line = re.sub(r"<[A-Za-z_$][\w$.<>\[\], |]*>", " ", line)
     line = re.sub(r"\b(?:implements|extends)\s+[A-Za-z_$][\w$.]*", " ", line)
     return line
-
 
 def collect_declared(code: str) -> set[str]:
     declared: set[str] = set()
@@ -168,7 +179,6 @@ def collect_declared(code: str) -> set[str]:
     # does not get mistaken for a global.
     declared |= set(re.findall(r"\b(?:interface|type|enum)\s+([A-Za-z_$][\w$]*)", code))
     return declared
-
 
 def check_prompt_defaults() -> list[str]:
     """Assert every quick action resolves to a real prompt string.
@@ -229,7 +239,6 @@ def check_prompt_defaults() -> list[str]:
                 )
     return problems
 
-
 # Zotero API members that do NOT exist, with the correct replacement.
 #
 # These are worse than missing globals: `obj.missing?.()` is valid JavaScript,
@@ -240,7 +249,6 @@ def check_prompt_defaults() -> list[str]:
 BOGUS_ZOTERO_MEMBERS: dict[str, str] = {
     "getText": "use the `attachmentText` property (extracts on demand when unindexed)",
 }
-
 
 def check_bogus_zotero_members(root: "Path") -> list[str]:
     problems: list[str] = []
@@ -253,7 +261,6 @@ def check_bogus_zotero_members(root: "Path") -> list[str]:
                         f"{path}:{line_no}  Zotero.Item has no `{bogus}` — {replacement}"
                     )
     return problems
-
 
 def main() -> int:
     problems: list[tuple[str, int, str, str]] = []
@@ -336,7 +343,6 @@ def main() -> int:
     total = len(seen) + len(prompt_problems)
     print(f"\n{total} problem(s)")
     return 1
-
 
 if __name__ == "__main__":
     sys.exit(main())

@@ -148,7 +148,7 @@ L̃GD [ϕ] = L[ϕ] +
 
 ## 已知限制
 
-- **只在 Zotero 10 / Linux 上验证过。** 未在其他版本或平台测试
+- **只在 Zotero 10 / Linux 上验证过。** 未在其他版本或平台测试。构建链本身跨平台（无 shell 依赖、路径处理兼容 Windows），但**未在 Windows / macOS 上实际构建过**
 - **检索是词面匹配**，不是语义检索（见上）
 - **`.doc` / `.docx` 格式的 SI 读不到** —— Zotero 不索引 Word 文档（其 `isCachedMIMEType` 只覆盖 PDF、HTML、EPUB）。
 - **SI 判定是启发式的** —— 优先读文档首页的自述（"Supporting Information for..."），读不到文本时才回退到文件名特征。权衡是**精度优先**：漏掉一份 SI 只是少发材料，把正文误判成 SI 会误导模型
@@ -164,6 +164,16 @@ npm install
 npm run build      # 打包 + 类型检查 + 6 项校验
 npm run test:local # 261 项单元测试
 ```
+
+**环境要求**
+
+| | 版本 | 说明 |
+| --- | --- | --- |
+| Node | **≥ 22.8** | 由 `zotero-plugin-scaffold` 决定；已在 `engines` 中声明 |
+| Python | **≥ 3.8** | 构建期校验脚本用；脚本会自行检查并给出提示 |
+| 系统 | 不限 | 构建链只用 npm 与 Python，不依赖 shell 工具；路径处理已考虑 Windows 的反斜杠 |
+
+`scripts/render-check/run.sh` 需要 bash 与 Firefox，属于**可选的**开发工具——不影响构建与使用。
 
 `npm run build` 会依次执行：
 

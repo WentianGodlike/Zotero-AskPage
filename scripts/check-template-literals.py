@@ -30,6 +30,14 @@ without parsing, so only the unambiguous case is reported.
 
 from __future__ import annotations
 
+import sys
+
+if sys.version_info < (3, 8):  # noqa: UP036
+    sys.exit(
+        "This script needs Python 3.8 or newer "
+        f"(running {sys.version.split()[0]})."
+    )
+
 import re
 import sys
 from pathlib import Path
@@ -42,7 +50,6 @@ TEMPLATE_RE = re.compile(
 
 # Files worth checking: the ones that embed markup or styles in a template.
 TARGETS = ["src/**/*.ts"]
-
 
 def check_file(path: Path) -> list[str]:
     problems: list[str] = []
@@ -69,7 +76,6 @@ def check_file(path: Path) -> list[str]:
 
     return problems
 
-
 def main() -> int:
     root = Path(__file__).resolve().parent.parent
     files: list[Path] = []
@@ -90,7 +96,6 @@ def main() -> int:
 
     print("OK — no backticks inside template literals")
     return 0
-
 
 if __name__ == "__main__":
     sys.exit(main())
