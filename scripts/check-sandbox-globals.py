@@ -162,6 +162,66 @@ def collect_declared(code: str) -> set[str]:
     return declared
 
 
+def check_prompt_defaults() -> list[str]:
+    """Assert every quick action resolves to a real prompt string.
+
+    A `const` referenced before its declaration yields `undefined` at module
+    evaluation (temporal dead zone). Nothing throws, so the failure mode is
+    silent: the action ships with an empty prompt and the model gets asked
+    nothing in particular. That happened once with the translate task.
+    """
+    prompts_path = os.path.join(SRC_DIR, "modules", "prompts.ts")
+    if not os.path.exists(prompts_path):
+        return ["prompts.ts not found"]
+
+    code = open(prompts_path, encoding="utf-8").read()
+
+    # Only look inside the QUICK_ACTIONS array: `prefKey` also appears in
+    # promptFields(), and those entries are not actions.
+    array_start = code.find("QUICK_ACTIONS")
+    if array_start < 0:
+        return ["QUICK_ACTIONS not found in prompts.ts"]
+    array = code[array_start:]
+    end = array.find("\n];")
+    if end >= 0:
+        array = array[:end]
+
+    keys = re.findall(r'prefKey:\s*"([^"]+)"', array)
+    if not keys:
+        return ["no quick actions found"]
+
+    problems: list[str] = []
+    for key in keys:
+        block = re.search(
+            rf'prefKey:\s*"{re.escape(key)}",(.*?)defaultPrompt:\s*(.+?),?\n',
+            array,
+            re.S,
+        )
+        if not block:
+            problems.append(f"quick action {key!r} has no defaultPrompt")
+            continue
+
+        value = block.group(2).strip().rstrip(",")
+        if value in ("undefined", "null", '""'):
+            problems.append(
+                f"quick action {key!r} resolves its default prompt to {value} "
+                "(a const declared after use is undefined at module evaluation)"
+            )
+            continue
+
+        # A bare identifier must be declared before QUICK_ACTIONS.
+        if re.fullmatch(r"[A-Za-z_$][\w$]*", value):
+            m = re.search(rf"(?:const|let)\s+{re.escape(value)}\b", code)
+            if not m:
+                problems.append(f"quick action {key!r} references undeclared {value}")
+            elif m.start() > array_start:
+                problems.append(
+                    f"quick action {key!r} uses {value}, which is declared AFTER "
+                    "QUICK_ACTIONS — it will be undefined at module evaluation"
+                )
+    return problems
+
+
 def main() -> int:
     problems: list[tuple[str, int, str, str]] = []
     checked = 0
@@ -200,13 +260,17 @@ def main() -> int:
 
             checked += 1
 
+    prompt_problems = check_prompt_defaults()
+    for msg in prompt_problems:
+        print(f"FAIL: {msg}")
+
     print(f"scanned {checked} source file(s)")
     print(
         f"allowlist: {len(WEB_ALLOWLIST)} web APIs, {len(SCOPE_EXTRAS)} scope extras, "
         f"{len(LANGUAGE_BUILTINS)} language built-ins"
     )
 
-    if not problems:
+    if not problems and not prompt_problems:
         if GUARDED_EXCEPTIONS:
             print(f"\n({len(GUARDED_EXCEPTIONS)} documented guarded exception(s) skipped)")
         print("OK — no unavailable globals referenced")
