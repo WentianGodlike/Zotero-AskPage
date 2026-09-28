@@ -310,6 +310,54 @@ export function captureSelection(
 }
 
 /* ------------------------------------------------------------------ */
+/* Finding the live selection                                          */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Find the non-empty selection, searching into child frames.
+ *
+ * The panel lives in the reader's window while the PDF is rendered inside a
+ * nested frame, so the outermost `getSelection()` is always empty. The frame
+ * holding the text is found by walking inwards and keeping the first non-empty
+ * selection. Same-process frames are directly reachable; a cross-origin frame
+ * throws on access and is skipped.
+ */
+export function findAnySelection(win: Window | null, depth = 0): Selection | null {
+  if (!win || depth > 6) {
+    return null;
+  }
+  try {
+    const own = win.getSelection?.();
+    if (own && own.rangeCount && String(own.toString() || "").trim()) {
+      return own;
+    }
+  } catch {
+    /* the window is not accessible */
+  }
+
+  try {
+    const frames = win.frames;
+    for (let i = 0; i < frames.length; i++) {
+      let child: Window;
+      try {
+        child = frames[i] as Window;
+        // Touching a cross-origin frame's document throws; skip it.
+        void child.document;
+      } catch {
+        continue;
+      }
+      const found = findAnySelection(child, depth + 1);
+      if (found) {
+        return found;
+      }
+    }
+  } catch {
+    /* frames unavailable */
+  }
+  return null;
+}
+
+/* ------------------------------------------------------------------ */
 /* Diagnostics                                                         */
 /* ------------------------------------------------------------------ */
 
@@ -371,28 +419,62 @@ export async function captureSelectionToFile(
  * When a capture comes out wrong, the numbers say whether the page canvas was
  * found, what the scale factor was, and which region was taken.
  */
-export function describeGeometry(selection: Selection | null): string {
+export interface GeometryReport {
+  ok: boolean;
+  /** Which piece is missing, when not ok. */
+  missing?: "selection" | "textLayer" | "canvas" | "rects";
+  text: string;
+}
+
+/**
+ * Describe the geometry without capturing.
+ *
+ * When a capture fails, "it did not work" is useless; what matters is *which*
+ * lookup failed. The panel shows this directly, so a failure can be reported
+ * without digging through the debug console.
+ */
+export function describeGeometry(selection: Selection | null): GeometryReport {
   try {
     if (!selection || !selection.rangeCount) {
-      return "no selection";
+      return { ok: false, missing: "selection", text: "没有选中内容" };
     }
     const range = selection.getRangeAt(0);
     const layer = findTextLayer(range.startContainer);
     const canvas = findPageCanvas(range.startContainer);
     const rects = range.getClientRects();
-    return [
-      `textLayer=${layer ? "found" : "MISSING"}`,
-      `canvas=${canvas ? `${canvas.width}x${canvas.height}` : "MISSING"}`,
-      `layerBox=${layer ? Math.round(layer.getBoundingClientRect().width) + "x" + Math.round(layer.getBoundingClientRect().height) : "-"}`,
-      `rects=${rects ? rects.length : 0}`,
-      `scale=${layer && canvas ? (canvas.width / Math.max(1, layer.getBoundingClientRect().width)).toFixed(2) : "-"}`,
-    ].join(" ");
+    const rectCount = rects ? rects.length : 0;
+
+    const parts = [
+      `textLayer=${layer ? "ok" : "缺失"}`,
+      `canvas=${canvas ? `${canvas.width}x${canvas.height}` : "缺失"}`,
+      layer
+        ? `layerBox=${Math.round(layer.getBoundingClientRect().width)}x${Math.round(
+            layer.getBoundingClientRect().height,
+          )}`
+        : "",
+      `rects=${rectCount}`,
+      layer && canvas
+        ? `scale=${(canvas.width / Math.max(1, layer.getBoundingClientRect().width)).toFixed(2)}`
+        : "",
+    ].filter(Boolean);
+
+    if (!layer) {
+      return { ok: false, missing: "textLayer", text: parts.join(" ") };
+    }
+    if (!canvas) {
+      return { ok: false, missing: "canvas", text: parts.join(" ") };
+    }
+    if (!rectCount) {
+      return { ok: false, missing: "rects", text: parts.join(" ") };
+    }
+    return { ok: true, text: parts.join(" ") };
   } catch (e) {
-    return `geometry failed: ${(e as Error)?.message || e}`;
+    return { ok: false, text: `几何计算失败: ${(e as Error)?.message || e}` };
   }
 }
 
 /**
+ * Approximate decoded size of a base64 PNG, in bytes./**
  * Approximate decoded size of a base64 PNG, in bytes.
  *
  * Used to stay under the provider's per-image limit before sending.
