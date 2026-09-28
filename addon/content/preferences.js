@@ -405,6 +405,7 @@
     $("sendNearby").checked = Boolean(readPref("sendNearby", true));
     $("sendAnnotations").checked = Boolean(readPref("sendAnnotations", true));
     $("sendSI").checked = Boolean(readPref("sendSI", true));
+    $("sendScreenshot").checked = Boolean(readPref("sendScreenshot", true));
     $("sendFullText").checked = Boolean(readPref("sendFullText", false));
     $("fullTextMaxChars").value = String(readPref("fullTextMaxChars", 120000));
     $("saveToNote").checked = Boolean(readPref("saveToNote", true));
@@ -490,6 +491,7 @@
     writePref("sendNearby", $("sendNearby").checked);
     writePref("sendAnnotations", $("sendAnnotations").checked);
     writePref("sendSI", $("sendSI").checked);
+    writePref("sendScreenshot", $("sendScreenshot").checked);
     writePref("sendFullText", $("sendFullText").checked);
     writePref("saveToNote", $("saveToNote").checked);
     writePref("saveToJson", $("saveToJson").checked);

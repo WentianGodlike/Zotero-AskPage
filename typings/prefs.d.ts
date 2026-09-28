@@ -23,6 +23,7 @@ declare namespace _ZoteroTypes {
       "sendAnnotations": boolean;
       "sendSI": boolean;
       "debugScreenshot": boolean;
+      "sendScreenshot": boolean;
       "siMaxChars": number;
       "sendFullText": boolean;
       "fullTextMaxChars": number;
