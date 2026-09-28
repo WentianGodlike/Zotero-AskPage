@@ -14,6 +14,12 @@
 export interface RenderOptions {
   /** Applied to the root container. */
   className?: string;
+  /**
+   * Render math into the given container instead of showing the LaTeX source.
+   * Returning false (or omitting this) falls back to a monospace chip, which
+   * keeps formulas readable even when the math stylesheet is unavailable.
+   */
+  renderMath?: (container: HTMLElement, latex: string, display: boolean) => boolean;
 }
 
 const MATH_PLACEHOLDER_PREFIX = "\u0000MATH";
@@ -25,6 +31,7 @@ export function renderMarkdown(
 ): HTMLElement {
   const root = doc.createElement("div");
   root.className = options.className || "ha-md";
+  const renderMath = options.renderMath;
 
   const mathStore: string[] = [];
   const codeStore: { lang: string; code: string }[] = [];
@@ -112,13 +119,18 @@ export function renderMarkdown(
       continue;
     }
     if (block.kind === "math") {
+      const latex = mathStore[block.index];
       const el = doc.createElement("div");
+      // The source stays in the class list so the CSS can style the fallback
+      // state; a successful render replaces the text content below.
       el.className = "ha-math-block";
-      el.textContent = mathStore[block.index];
+      if (!renderMath || !renderMath(el, latex, true)) {
+        el.textContent = latex;
+      }
       root.appendChild(el);
       continue;
     }
-    renderTextBlock(doc, root, block.lines, mathStore);
+    renderTextBlock(doc, root, block.lines, mathStore, renderMath);
   }
 
   return root;
@@ -147,6 +159,7 @@ function renderTextBlock(
   root: HTMLElement,
   lines: string[],
   mathStore: string[],
+  renderMath?: RenderOptions["renderMath"],
 ): void {
   let list: HTMLElement | null = null;
   let listType: "ul" | "ol" | null = null;
@@ -173,7 +186,7 @@ function renderTextBlock(
       closeList();
       const level = Math.min(heading[1].length + 2, 6); // h1 -> h3, keeps panel sane
       const el = doc.createElement(`h${level}`);
-      appendInline(doc, el, heading[2], mathStore);
+      appendInline(doc, el, heading[2], mathStore, renderMath);
       root.appendChild(el);
       continue;
     }
@@ -190,7 +203,7 @@ function renderTextBlock(
     if (quote) {
       closeList();
       const el = doc.createElement("blockquote");
-      appendInline(doc, el, quote[1], mathStore);
+      appendInline(doc, el, quote[1], mathStore, renderMath);
       root.appendChild(el);
       continue;
     }
@@ -204,7 +217,7 @@ function renderTextBlock(
         listType = "ul";
       }
       const li = doc.createElement("li");
-      appendInline(doc, li, ul[1], mathStore);
+      appendInline(doc, li, ul[1], mathStore, renderMath);
       list!.appendChild(li);
       continue;
     }
@@ -218,7 +231,7 @@ function renderTextBlock(
         listType = "ol";
       }
       const li = doc.createElement("li");
-      appendInline(doc, li, ol[1], mathStore);
+      appendInline(doc, li, ol[1], mathStore, renderMath);
       list!.appendChild(li);
       continue;
     }
@@ -226,7 +239,7 @@ function renderTextBlock(
     // Paragraph
     closeList();
     const p = doc.createElement("p");
-    appendInline(doc, p, line, mathStore);
+    appendInline(doc, p, line, mathStore, renderMath);
     root.appendChild(p);
   }
 
@@ -242,6 +255,7 @@ function appendInline(
   parent: HTMLElement,
   text: string,
   mathStore: string[],
+  renderMath?: RenderOptions["renderMath"],
 ): void {
   // Protect inline math first so emphasis rules cannot chew through it.
   const protectedText = text.replace(
@@ -281,11 +295,14 @@ function appendInline(
       code.textContent = m[2].trim();
       parent.appendChild(code);
     } else if (m[4] !== undefined) {
-      // math
-      const span = doc.createElement("span");
-      span.className = "ha-math-inline";
-      span.textContent = mathStore[Number(m[4])] ?? "";
-      parent.appendChild(span);
+      // Math. Prefer the real renderer; fall back to showing the source.
+      const latex = mathStore[Number(m[4])] ?? "";
+      const el = doc.createElement("span");
+      el.className = "ha-math-inline";
+      if (!renderMath || !renderMath(el, latex, false)) {
+        el.textContent = latex;
+      }
+      parent.appendChild(el);
     } else if (m[5] !== undefined) {
       parent.appendChild(wrapEmphasis(doc, m[5], "strong", "em"));
     } else if (m[6] !== undefined || m[7] !== undefined) {
