@@ -1361,6 +1361,51 @@ const CSS = `
   white-space: pre-wrap;
   word-break: break-word;
   text-align: center;
+}
+
+/* Rendered display maths scrolls sideways instead of being clipped.
+   The sidebar is narrow and formulas are wide, so a long equation has to be
+   reachable rather than cut off at both ends — which is what centring does
+   inside an overflowing box. A max-width of 100% plus min-width 0 is what
+   actually enables the scroll: a flex item defaults to min-width auto and
+   would otherwise grow past the panel. */
+.ha-chat .ha-math-block.ha-math-rendered,
+.ha-chat .ha-math-display {
+  max-width: 100%;
+  min-width: 0;
   overflow-x: auto;
+  overflow-y: hidden;
+  text-align: center;
+  /* Keep the formula on one line so it scrolls rather than wraps; a wrapped
+     matrix or fraction is harder to read than a scrolled one. */
+  white-space: nowrap;
+  /* A visible bar: an overlay scrollbar that only appears while scrolling is
+     no help when the reader does not know there is more to the right. */
+  scrollbar-width: thin;
+  scrollbar-color: #b9c0cc transparent;
+  padding-bottom: 10px;
+}
+.ha-chat .ha-math-block.ha-math-rendered::-webkit-scrollbar {
+  height: 8px;
+}
+.ha-chat .ha-math-block.ha-math-rendered::-webkit-scrollbar-track {
+  background: #e9e4f7;
+  border-radius: 4px;
+}
+.ha-chat .ha-math-block.ha-math-rendered::-webkit-scrollbar-thumb {
+  background: #b9a9e6;
+  border-radius: 4px;
+}
+.ha-chat .ha-math-block.ha-math-rendered::-webkit-scrollbar-thumb:hover {
+  background: #9c88d8;
+}
+/* KaTeX's display mode centres with a full-width block; inside a scroller that
+   pushes the left edge out of reach, so let the content size itself. */
+.ha-chat .ha-math-block.ha-math-rendered .katex-display {
+  margin: 0;
+  text-align: inherit;
+}
+.ha-chat .ha-math-block.ha-math-rendered .katex-display > .katex {
+  text-align: inherit;
 }
 `;
