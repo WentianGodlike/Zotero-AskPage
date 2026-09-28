@@ -512,6 +512,33 @@ export function createChatView(options: ChatViewOptions): ChatView {
   let lastImageCount = 0;
 
   /**
+   * Turn the stashed capture into attachments, if there is one.
+   *
+   * Called by *both* the first question and follow-ups. It used to live inside
+   * the first-question path only, so a screenshot worked once per session and
+   * silently stopped after that — the stash had already been consumed.
+   */
+  function collectImages(): Array<{ dataUrl: string }> | undefined {
+    lastImageCount = 0;
+    if (!wantScreenshot) {
+      return undefined;
+    }
+    const pending = takePendingCapture();
+    if (!pending) {
+      return undefined;
+    }
+    const tiles = renderCaptureTiles(pending);
+    if (!tiles.length) {
+      return undefined;
+    }
+    lastImageCount = tiles.length;
+    Zotero.debug(
+      `[Highlight Ask] attaching ${tiles.length} tile(s): ${pending.detail}`,
+    );
+    return tiles.map((t) => ({ dataUrl: t.dataUrl }));
+  }
+
+  /**
    * Assemble what to send.
    *
    * Async because annotations and notes live in the library. Kept separate from
@@ -537,22 +564,7 @@ export function createChatView(options: ChatViewOptions): ChatView {
     // selections are tiled rather than shrunk: the provider resamples any image
     // over ~1300x1300, which is what makes an embedded formula unreadable in a
     // wide crop, while several tiles each keep their resolution.
-    let images: Array<{ dataUrl: string }> | undefined;
-    if (wantScreenshot) {
-      const pending = takePendingCapture();
-      if (pending) {
-        const tiles = renderCaptureTiles(pending);
-        if (tiles.length) {
-          images = tiles.map((t) => ({ dataUrl: t.dataUrl }));
-          lastImageCount = tiles.length;
-          Zotero.debug(
-            `[Highlight Ask] attaching ${tiles.length} tile(s): ${pending.detail}`,
-          );
-        }
-      }
-    }
-    lastImageCount = images ? images.length : 0;
-
+    const images = collectImages();
     paintContextLine();
     return {
       nearby: bundle.nearby,
@@ -1104,11 +1116,13 @@ export function createChatView(options: ChatViewOptions): ChatView {
       seedSelection = (selection || "").trim();
       setQuote(seedSelection);
       if (history.length) {
-        const messages = buildFollowUpMessages(
-          history,
-          `${question}\n\n（新选中的片段：\n"""\n${seedSelection}\n"""\n）`,
-        );
+        const followUp = `${question}\n\n（新选中的片段：\n"""\n${seedSelection}\n"""\n）`;
+        // Follow-ups carry the screenshot too. A new formula is selected for
+        // most follow-ups, so omitting it here was the difference between "the
+        // first formula works" and "every formula works".
+        const messages = buildFollowUpMessages(history, followUp, collectImages());
         history = messages;
+        paintContextLine();
         void ask(messages, question, { text: question });
         return;
       }

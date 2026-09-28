@@ -1115,6 +1115,62 @@ test("a throwing Zotero.Items.get degrades to no match", () => {
   }
 });
 
+console.log("\nfollow-up messages carry screenshots");
+// A screenshot used to work only for the first question of a session: the first
+// path attached it, and the follow-up path — which never called the assembler —
+// silently dropped it for every later formula.
+test("a follow-up without images stays a plain string", () => {
+  const history = [{ role: "user" as const, content: "first" }];
+  const out = buildFollowUpMessages(history, "second");
+  assert.equal(out.length, 2);
+  assert.equal(out[1].content, "second");
+});
+
+test("a follow-up with an image becomes content parts", () => {
+  const history = [{ role: "user" as const, content: "first" }];
+  const out = buildFollowUpMessages(history, "second", [
+    { dataUrl: "data:image/png;base64,AAAA" },
+  ]);
+  const last = out[out.length - 1];
+  assert.ok(Array.isArray(last.content), "expected content parts");
+  const parts = last.content as any[];
+  assert.equal(parts[0].type, "text");
+  assert.equal(parts[0].text, "second");
+  assert.equal(parts[1].type, "image_url");
+  assert.equal(parts[1].image_url.url, "data:image/png;base64,AAAA");
+});
+
+test("several tiles become several image parts", () => {
+  const out = buildFollowUpMessages([], "q", [
+    { dataUrl: "data:image/png;base64,AA" },
+    { dataUrl: "data:image/png;base64,BB" },
+    { dataUrl: "data:image/png;base64,CC" },
+  ]);
+  const parts = out[out.length - 1].content as any[];
+  assert.equal(parts.filter((p) => p.type === "image_url").length, 3);
+});
+
+test("images are declared as original so nothing is resampled", () => {
+  const out = buildFollowUpMessages([], "q", [
+    { dataUrl: "data:image/png;base64,AA" },
+  ]);
+  const parts = out[out.length - 1].content as any[];
+  assert.equal(parts[1].image_url.detail, "original");
+});
+
+test("the previous history is preserved", () => {
+  const history = [
+    { role: "system" as const, content: "sys" },
+    { role: "user" as const, content: "first" },
+  ];
+  const out = buildFollowUpMessages(history, "second", [
+    { dataUrl: "data:image/png;base64,AA" },
+  ]);
+  assert.equal(out.length, 3);
+  assert.equal(out[0].content, "sys");
+  assert.equal(out[1].content, "first");
+});
+
 console.log("\nmarkdown: display maths keeps its display flag");
 // A `$$...$$` sitting inside a paragraph used to be reconstructed with
 // display:false, which renders sums and fractions at inline size — the "flat
