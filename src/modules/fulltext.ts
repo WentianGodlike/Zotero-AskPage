@@ -18,6 +18,13 @@ export interface PaperText {
   /** True when the text was cut down to fit the character budget. */
   truncated: boolean;
   chars: number;
+  /**
+   * The untruncated extraction, kept as the retrieval corpus.
+   *
+   * Searching `text` alone would miss exactly the parts that were cut, which is
+   * the failure this whole feature exists to fix.
+   */
+  raw?: string;
 }
 
 const cache = new Map<number, PaperText>();
@@ -76,26 +83,35 @@ export async function getPaperText(
     for (const attachment of await candidateItems(itemID)) {
       let raw = "";
       try {
-        // `getText()` (the indexed full text) is implemented on attachments but
-        // is not in the type definitions, so reach it through a narrow cast.
-        const indexed = attachment as unknown as {
-          getText?: () => Promise<string>;
-        };
-        raw = (await indexed.getText?.()) || "";
+        // `attachmentText` is the supported accessor. It reads the index cache
+        // when there is one and otherwise extracts the text on demand, so it
+        // works for documents Zotero has not indexed (a large book, typically).
+        //
+        // An earlier version called `getText()`, which does not exist on
+        // Zotero.Item — the optional call silently yielded undefined, so the
+        // full-text feature looked enabled while sending nothing at all.
+        raw = (await (attachment as any).attachmentText) || "";
       } catch (e) {
-        // A missing or unbuilt index is expected, not an error worth surfacing.
         Zotero.debug(
-          `[Highlight Ask] getText() failed for item ${attachment.id}: ${
+          `[Highlight Ask] attachmentText failed for item ${attachment.id}: ${
             (e as Error)?.message || e
           }`,
         );
       }
+      Zotero.debug(
+        `[Highlight Ask] full text for attachment ${attachment.id}: ${raw.length} chars`,
+      );
       if (!raw.trim()) {
         continue;
       }
 
       const { text, truncated } = trimFullText(raw, budget);
-      const result: PaperText = { text, truncated, chars: text.length };
+      const result: PaperText = {
+        text,
+        truncated,
+        chars: text.length,
+        raw: truncated ? raw : undefined,
+      };
       cache.set(itemID, result);
       return result;
     }

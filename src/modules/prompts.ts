@@ -120,6 +120,10 @@ export const DEFAULT_SCENARIO_PROMPT = `关于你收到的文本，必须知道�
 - 以截图为准还原公式，并与文本内容相互印证；两者冲突时以截图为准
 - 仍按上面的要求输出 LaTeX，不要描述图片本身
 
+关于「检索出的段落」：
+- 它们按在全文中的位置排序，每段前的百分比标出大致位置，引用时可以据此说明"这出现在全书约 N% 处"
+- 如果检索结果与问题无关，就直说依据不足，不要拿无关段落凑答案
+
 关于 Supporting Information：
 - 若提供了 SI，它常含正文放不下的推导、参数表与补充图，优先在其中找依据
 - 引用 SI 内容时指明来自 SI，不要把 SI 的内容说成正文的内容
@@ -242,6 +246,13 @@ export interface BuildContext {
   notes?: string[];
   /** Supporting Information documents attached to the same item. */
   supportingInfo?: Array<{ name: string; text: string }>;
+  /**
+   * Passages found by searching a document too long to send whole.
+   *
+   * They come from anywhere in the document, not from near the selection, which
+   * is the point: a question asked in chapter 8 can be answered from chapter 1.
+   */
+  retrieved?: string;
 }
 
 /**
@@ -274,6 +285,15 @@ export function buildUserMessage(ctx: BuildContext): string {
     parts.push(
       "读者自己写的笔记：\n" +
         ctx.notes.map((n, i) => `【笔记 ${i + 1}】\n${n}`).join("\n\n"),
+    );
+  }
+  if (ctx.retrieved && ctx.retrieved.trim()) {
+    parts.push(
+      "以下是从全文（太长，无法整篇附上）中检索出的相关段落。它们可能来自书中的" +
+        "任何位置，不限于选中片段附近；需要跨章节回答时以此为依据：\n" +
+        '"""\n' +
+        ctx.retrieved +
+        '\n"""',
     );
   }
   if (ctx.supportingInfo && ctx.supportingInfo.length) {

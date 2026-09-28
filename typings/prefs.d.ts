@@ -27,6 +27,8 @@ declare namespace _ZoteroTypes {
       "siMaxChars": number;
       "sendFullText": boolean;
       "fullTextMaxChars": number;
+      "retrievePassages": boolean;
+      "retrieveTopK": number;
       "saveToNote": boolean;
       "saveToJson": boolean;
       "logRequests": boolean;
