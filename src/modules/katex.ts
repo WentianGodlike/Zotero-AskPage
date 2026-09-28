@@ -21,7 +21,6 @@
 
 import katex from "katex";
 
-const NOTE_EDITOR_BASE = "resource://zotero/note-editor/";
 const FONT_STYLE_ID = "ha-katex-fonts";
 const LAYOUT_STYLE_ID = "ha-katex-layout";
 
@@ -197,37 +196,33 @@ export function parseHtmlToMathNodes(html: string): MathNode {
 /* ------------------------------------------------------------------ */
 
 /**
- * Keep only KaTeX's `@font-face` rules and point them at Zotero's copies.
+ * Reduce the stylesheet's `@font-face` rules to woff2 only.
  *
- * The shipped stylesheet refers to `fonts/KaTeX_*.woff2` relative to itself,
- * which resolves nowhere once injected into a reader document. Zotero has the
- * same fonts under `assets/fonts/`, so the URLs are rewritten rather than
- * bundling 1.2 MB of duplicates.
+ * The fonts are shipped in the addon, so the relative `fonts/...` URLs resolve
+ * against `katex.css` and need no rewriting. The woff and ttf fallbacks are
+ * dropped because only woff2 is bundled — leaving them would produce 404s on
+ * every formula.
  */
-export function rewriteFontFaces(
-  css: string,
-  fontBase = NOTE_EDITOR_BASE,
-): string {
+export function keepWoff2FontFaces(css: string): string {
   const out: string[] = [];
   for (const raw of css.split("}")) {
     const block = raw.trim();
     if (!block || !/^@font-face\b/i.test(block)) {
       continue;
     }
-    out.push(
-      block.replace(
-        /url\(\s*(['"]?)([^'")]+)\1\s*\)/gi,
-        (_m, _q, url: string) =>
-          `url(${
-            /^(data:|https?:|resource:|chrome:|jar:)/i.test(url)
-              ? url
-              : fontBase +
-                url
-                  .replace(/^\.?\//, "")
-                  .replace(/^fonts\//, "assets/fonts/")
-          })`,
-      ) + "}",
-    );
+    // Keep the whole rule, but only its woff2 source entries.
+    const kept = block
+      .split(",")
+      .filter((part, index) => {
+        if (index === 0) {
+          // The first comma-separated piece still holds the declaration head
+          // (for example `@font-face{font-family:...;src:url(fonts/x.woff2)`).
+          return true;
+        }
+        return /woff2/i.test(part);
+      })
+      .join(",");
+    out.push(kept + "}");
   }
   return out.join("\n");
 }
@@ -294,7 +289,10 @@ export async function installKatexStyles(
     if (!css.trim()) {
       return false;
     }
-    addStyle(doc, FONT_STYLE_ID, rewriteFontFaces(css));
+    // Fonts first, then layout. Both are needed: without the font faces KaTeX
+    // falls back to a system serif and the maths glyphs render flat, which
+    // looks like a broken formula rather than a missing font.
+    addStyle(doc, FONT_STYLE_ID, keepWoff2FontFaces(css));
     addStyle(doc, LAYOUT_STYLE_ID, stripFontFaces(css));
     return true;
   } catch (e) {
