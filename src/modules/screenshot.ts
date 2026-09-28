@@ -602,6 +602,150 @@ export function findAnySelection(win: Window | null, depth = 0): Selection | nul
   return null;
 }
 
+export interface FrameProbe {
+  url: string;
+  depth: number;
+  /** Non-empty selection found via the plain (Xray-wrapped) window. */
+  plainSelection: boolean;
+  /** Non-empty selection found via wrappedJSObject. */
+  unwrappedSelection: boolean;
+  frameCount: number;
+}
+
+export interface SelectionSearch {
+  selection: Selection | null;
+  probes: FrameProbe[];
+  /** Human-readable trace, shown in the panel. */
+  trace: string;
+}
+
+/**
+ * Search a window subtree for a live text selection, recording what was seen.
+ *
+ * The reader's `_iframeWindow` is `reader.html`, the React shell; the PDF viewer
+ * sits deeper inside it. Rather than guessing the nesting, every frame is
+ * visited and probed, and the trace is reported — the previous attempts failed
+ * precisely because the structure was assumed rather than observed.
+ *
+ * Both the plain window and `wrappedJSObject` are probed: across the
+ * chrome/content boundary one of them can expose a selection the other does not.
+ */
+export function searchSelectionDeep(
+  win: Window | null,
+  depth = 0,
+  seen = new Set<unknown>(),
+  probes: FrameProbe[] = [],
+): SelectionSearch {
+  if (!win || depth > 5 || seen.has(win)) {
+    return { selection: null, probes, trace: renderProbes(probes) };
+  }
+  seen.add(win);
+
+  const describe = (w: any): { sel: Selection | null; url: string; frames: number } => {
+    let url = "";
+    let frames = 0;
+    let sel: Selection | null = null;
+    try {
+      url = String(w?.location?.href || "");
+    } catch {
+      url = "(url 不可读)";
+    }
+    try {
+      frames = Number(w?.frames?.length) || 0;
+    } catch {
+      frames = -1;
+    }
+    try {
+      const candidate = w?.getSelection?.();
+      if (candidate && candidate.rangeCount && String(candidate.toString() || "").trim()) {
+        sel = candidate as Selection;
+      }
+    } catch {
+      /* not accessible on this wrapper */
+    }
+    return { sel, url, frames };
+  };
+
+  const plain = describe(win);
+  let unwrapped: ReturnType<typeof describe> | null = null;
+  try {
+    const raw = (win as any).wrappedJSObject;
+    if (raw && raw !== win) {
+      unwrapped = describe(raw);
+    }
+  } catch {
+    /* no wrapper available */
+  }
+
+  probes.push({
+    url: plain.url,
+    depth,
+    plainSelection: Boolean(plain.sel),
+    unwrappedSelection: Boolean(unwrapped?.sel),
+    frameCount: plain.frames,
+  });
+
+  if (plain.sel) {
+    return { selection: plain.sel, probes, trace: renderProbes(probes) };
+  }
+  if (unwrapped?.sel) {
+    return { selection: unwrapped.sel, probes, trace: renderProbes(probes) };
+  }
+
+  // Recurse. Both the wrapped and unwrapped frame lists are tried, since one may
+  // be empty across the boundary.
+  const containers: any[] = [win];
+  try {
+    if ((win as any).wrappedJSObject) {
+      containers.push((win as any).wrappedJSObject);
+    }
+  } catch {
+    /* ignore */
+  }
+  for (const container of containers) {
+    let frames: any;
+    try {
+      frames = container.frames;
+    } catch {
+      continue;
+    }
+    const count = Number(frames?.length) || 0;
+    for (let i = 0; i < count; i++) {
+      let child: any = null;
+      try {
+        child = frames[i];
+      } catch {
+        continue;
+      }
+      const found = searchSelectionDeep(child, depth + 1, seen, probes);
+      if (found.selection) {
+        return found;
+      }
+    }
+  }
+  return { selection: null, probes, trace: renderProbes(probes) };
+}
+
+/** One line per frame visited, for the panel's diagnostic message. */
+function renderProbes(probes: FrameProbe[]): string {
+  if (!probes.length) {
+    return "没有可访问的 frame";
+  }
+  return probes
+    .map((p) => {
+      const name = p.url.replace(/^resource:\/\/zotero\//, "").slice(0, 34) || "(无 url)";
+      const flags = [
+        p.plainSelection ? "选区" : "",
+        p.unwrappedSelection ? "选区(wrapped)" : "",
+        `子frame=${p.frameCount}`,
+      ]
+        .filter(Boolean)
+        .join(",");
+      return `${"·".repeat(p.depth)}${name}[${flags}]`;
+    })
+    .join("  ");
+}
+
 /** Best available selection: reader first, frame walk second. */
 export function locateSelection(win: Window | null): {
   selection: Selection | null;
