@@ -8,6 +8,10 @@ import {
 import { buildFollowUpMessages, buildInitialMessages } from "./prompts";
 import { renderMarkdown, type RenderOptions } from "./markdown";
 import { installKatexStyles, renderMathInto } from "./katex";
+import {
+  captureSelectionToFile,
+  describeGeometry,
+} from "./screenshot";
 import { getPref } from "../utils/prefs";
 import { getPaperText, describePaperText, type PaperText } from "./fulltext";
 import { buildContext, bundleSize, type ContextBundle } from "./context";
@@ -100,8 +104,13 @@ export function createChatView(options: ChatViewOptions): ChatView {
 
   const copyBtn = mkButton(doc, "复制", "复制最近的回答");
   const clearBtn = mkButton(doc, "清空", "开始一段新对话（已存档的内容不受影响）");
+  // Development aid: crop the current selection and save it, so the geometry
+  // can be checked by eye before wiring screenshots into the ask flow.
+  const shotBtn = mkButton(doc, "截图预览", "把当前选中区域裁成 PNG 存到数据目录");
+  shotBtn.classList.add("ha-chat-ghost");
+  shotBtn.hidden = !getPref("debugScreenshot");
 
-  head.append(title, spacer, fullTextBtn, copyBtn, clearBtn);
+  head.append(title, spacer, fullTextBtn, shotBtn, copyBtn, clearBtn);
 
   const contextLine = doc.createElement("div");
   contextLine.className = "ha-chat-context";
@@ -159,6 +168,20 @@ export function createChatView(options: ChatViewOptions): ChatView {
 
   let paperText: PaperText | null = null;
   let paperTextResolved = false;
+
+  /**
+   * The window that holds the page canvas and the selection.
+   *
+   * The panel renders inside the reader's own document in the sidebar case, so
+   * `doc.defaultView` already is that window; a floating host would differ.
+   */
+  function readerWindowRef(): Window | null {
+    try {
+      return doc.defaultView;
+    } catch {
+      return null;
+    }
+  }
 
   const session: Session = {
     id: makeSessionId(itemID),
@@ -684,6 +707,29 @@ export function createChatView(options: ChatViewOptions): ChatView {
     hooks?.onStatus?.("已开始新对话");
   });
 
+  shotBtn.addEventListener("click", () => {
+    void (async () => {
+      // The selection lives in the reader's own window, not this panel's.
+      const readerWindow = readerWindowRef();
+      const selection = readerWindow?.getSelection?.() ?? null;
+      const geometry = describeGeometry(selection as Selection | null);
+      Zotero.debug(`[Highlight Ask] capture geometry: ${geometry}`);
+      const result = await captureSelectionToFile(selection as Selection | null);
+      if (!result) {
+        flash(shotBtn, "截不到");
+        Zotero.debug(
+          `[Highlight Ask] capture failed. ${geometry}. ` +
+            "Likely the canvas or text layer was not found from the selection node.",
+        );
+        return;
+      }
+      flash(shotBtn, `${result.width}×${result.height}`);
+      Zotero.debug(
+        `[Highlight Ask] capture saved: ${result.path ?? "(not written)"} ${result.detail}`,
+      );
+    })();
+  });
+
   input.addEventListener("input", resizeInput);
   input.addEventListener("keydown", (e: KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -840,6 +886,14 @@ const CSS = `
   white-space: nowrap;
 }
 .ha-chat-btn:hover { background: var(--fill-quaternary, #dfe4ec); }
+/* Development-only button (截图预览): visually secondary. */
+.ha-chat-btn.ha-chat-ghost {
+  background: transparent;
+  border: 1px dashed var(--fill-quaternary, #c9d0da);
+  color: var(--fill-secondary, #6b7280);
+  font-size: 11px;
+}
+.ha-chat-btn.ha-chat-ghost:hover { background: var(--fill-quinary, #eef0f4); }
 .ha-chat-toggle.ha-chat-on { background: #2f6feb; color: #fff; }
 .ha-chat-send {
   background: #2f6feb;
