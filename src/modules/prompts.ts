@@ -114,6 +114,10 @@ export const DEFAULT_SCENARIO_PROMPT = `关于你收到的文本，必须知道�
 - 逐个解释符号含义；说明每一步推导依据的是什么定义或定理
 - 若原式残缺，给出你推测的完整形式，并标出哪部分是你的推测
 
+关于 Supporting Information：
+- 若提供了 SI，它常含正文放不下的推导、参数表与补充图，优先在其中找依据
+- 引用 SI 内容时指明来自 SI，不要把 SI 的内容说成正文的内容
+
 关于「读者的标注与笔记」：
 - 它们反映读者已经读到哪、在意什么，用来理解提问的意图，不要逐条复述
 - 若读者的批注本身有误解，直接指出，不要顺着错误往下讲
@@ -230,6 +234,8 @@ export interface BuildContext {
   annotations?: string;
   /** The reader's own notes, already converted to plain text. */
   notes?: string[];
+  /** Supporting Information documents attached to the same item. */
+  supportingInfo?: Array<{ name: string; text: string }>;
 }
 
 /**
@@ -263,6 +269,16 @@ export function buildUserMessage(ctx: BuildContext): string {
       "读者自己写的笔记：\n" +
         ctx.notes.map((n, i) => `【笔记 ${i + 1}】\n${n}`).join("\n\n"),
     );
+  }
+  if (ctx.supportingInfo && ctx.supportingInfo.length) {
+    for (const si of ctx.supportingInfo) {
+      parts.push(
+        `以下是本文的 Supporting Information（${si.name}，同样来自 PDF 抽取）：\n` +
+          '"""\n' +
+          si.text +
+          '\n"""',
+      );
+    }
   }
   if (ctx.nearby && ctx.nearby.trim() && ctx.nearby.trim() !== ctx.selection.trim()) {
     parts.push(

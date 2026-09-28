@@ -26,6 +26,12 @@ pref("sendNearby", true);
 // Attach the reader's own highlights and notes. Free (already in the library)
 // and unusually informative: they record what the reader judged important.
 pref("sendAnnotations", true);
+// Attach Supporting Information (the separate SI PDF publishers ship alongside
+// the article). Extended derivations and full parameter tables usually live
+// there, which is where questions about a paper's maths tend to land.
+pref("sendSI", true);
+// Character budget per SI document.
+pref("siMaxChars", 200000);
 // Default state of the per-panel "全文" toggle.
 pref("sendFullText", false);
 // Character budget for the full text when it is attached.

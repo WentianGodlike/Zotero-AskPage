@@ -106,8 +106,16 @@ KNOWN_MISSING_CAPS = {
 
 
 def strip_comments(text: str) -> str:
-    text = re.sub(r"/\*.*?\*/", "", text, flags=re.S)
-    text = re.sub(r"(?m)^\s*//.*$", "", text)
+    """Remove comments, including trailing ones.
+
+    Trailing comments matter: `// SI_1.pdf` after a regex literal was reported as
+    a reference to a global named `SI_1`. Block comments are replaced by
+    newlines so following line numbers stay aligned with the file.
+    """
+    text = re.sub(r"/\*.*?\*/", lambda m: "\n" * m.group(0).count("\n"), text, flags=re.S)
+    # Strip `//` comments but not the `//` inside a URL scheme such as
+    # resource:// — those appear inside string literals and are meaningful.
+    text = re.sub(r'(?m)(?<![:/])//(?![^"\n]*["\']\s*:).*$', "", text)
     return text
 
 
