@@ -21,6 +21,8 @@ declare namespace _ZoteroTypes {
       "promptTaskRole": string;
       "sendNearby": boolean;
       "sendAnnotations": boolean;
+      "sendSI": boolean;
+      "siMaxChars": number;
       "sendFullText": boolean;
       "fullTextMaxChars": number;
       "saveToNote": boolean;

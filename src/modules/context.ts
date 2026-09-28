@@ -17,6 +17,53 @@ import { getPref } from "../utils/prefs";
  * they considered important, and they are already sitting in Zotero.
  */
 
+/**
+ * Filename patterns that mark a PDF as Supporting Information.
+ *
+ * Taken from the naming conventions publishers actually use, observed in a real
+ * library: ACS `ma3c01377_si_001.pdf`, Wiley `advs10440-sup-0001-suppmat.pdf`,
+ * Elsevier `1-s2.0-...-main.pdf` for the article itself.
+ */
+const SI_PATTERNS: RegExp[] = [
+  // Separator-delimited "si": `_si_`, `-si-`, `SI_1`, `_SI_v2`.
+  //
+  // A bare " SI.pdf" is deliberately NOT matched. In a real library an article
+  // title ended in "... Shape Memory Polymers Si.pdf", which is indistinguishable
+  // from a file literally named "SI.pdf" at the filename level. Precision wins:
+  // sending the article as Supporting Information is worse than missing one.
+  /[-_]si[-_ ]?\d/i, // ACS: ma3c01377_si_001
+  /[-_]si(?![a-z])/i, // paper_SI, paper-SI_v2
+  /^si[-_ ]?\d/i, // SI_1.pdf
+  /supp(mat|lement|lementary|lemental|[-_ ]?info|[-_ ]?data)/i,
+  /(^|[^a-z])sup[-_ ]?0*\d/i, // sup-0001, supp0
+  /supporting[\s_-]*information/i,
+  /electronic[\s_-]*supplementary/i,
+  /(^|[^a-z])es[im](?![a-z])/i, // RSC ESI / ESM
+  /appendi(x|ces)/i,
+  /[-_]mmc\d/i, // Elsevier
+];
+
+/** Does this filename look like Supporting Information? */
+export function looksLikeSupportingInfo(name: string): boolean {
+  // Keep the extension: "SI.pdf" is a legitimate name, and dropping ".pdf"
+  // would remove the only thing marking the end of the token.
+  const base = String(name || "")
+    .replace(/^.*[\\/]/, "")
+    .toLowerCase();
+  if (!base || base === ".pdf") {
+    return false;
+  }
+  return SI_PATTERNS.some((re) => re.test(base));
+}
+
+export interface SupportingInfoDoc {
+  itemID: number;
+  name: string;
+  text: string;
+  chars: number;
+  truncated: boolean;
+}
+
 export interface Annotation {
   text: string;
   comment: string;
@@ -31,8 +78,18 @@ export interface ContextBundle {
   notes: string[];
   fullText?: string;
   fullTextTruncated: boolean;
+  /** Supporting Information documents attached to the same item. */
+  supportingInfo: SupportingInfoDoc[];
   /** Human-readable summary of what was actually included. */
   summary: string[];
+  /**
+   * Rough size of what will be sent, per source.
+   *
+   * Deliberately visible: the difference between "selection only" and "whole
+   * book" is a factor of ~50 in cost, and the reader is the only one who can
+   * judge whether that is worth it for a given question.
+   */
+  sizes: Array<{ label: string; chars: number }>;
 }
 
 /**
@@ -234,6 +291,49 @@ export function formatAnnotations(
   return lines.join("\n");
 }
 
+/**
+ * Text of any Supporting Information attached to this item.
+ *
+ * SI is where the extended derivations, extra figures and full parameter tables
+ * live, and questions about a paper's maths very often land there. It is
+ * attached as an ordinary sibling PDF, so it is found by filename rather than
+ * by any Zotero-level marker.
+ */
+export async function getSupportingInfo(
+  itemID: number,
+): Promise<SupportingInfoDoc[]> {
+  const out: SupportingInfoDoc[] = [];
+  try {
+    const budget = Number(getPref("siMaxChars")) || 200000;
+    for (const attachment of await pdfAttachments(itemID)) {
+      const name = String(
+        (attachment as any).attachmentFilename ||
+          (attachment as any).getField?.("title") ||
+          "",
+      );
+      if (!looksLikeSupportingInfo(name)) {
+        continue;
+      }
+      const indexed = attachment as unknown as { getText?: () => Promise<string> };
+      const raw = (await indexed.getText?.()) || "";
+      if (!raw.trim()) {
+        continue;
+      }
+      const { text, truncated } = trimFullText(raw, budget);
+      out.push({
+        itemID: attachment.id,
+        name: name || `SI-${attachment.id}`,
+        text,
+        chars: text.length,
+        truncated,
+      });
+    }
+  } catch (e) {
+    Zotero.debug(`[Highlight Ask] SI lookup failed: ${(e as Error)?.message || e}`);
+  }
+  return out;
+}
+
 export interface BuildContextOptions {
   itemID: number;
   selection: string;
@@ -269,7 +369,9 @@ export async function buildContext(
     annotations: [],
     notes: [],
     fullTextTruncated: false,
+    supportingInfo: [],
     summary: [],
+    sizes: [],
   };
 
   if (getPref("sendNearby")) {
@@ -294,13 +396,59 @@ export async function buildContext(
   if (wantFullText && paperText?.chars) {
     bundle.fullText = paperText.text;
     bundle.fullTextTruncated = paperText.truncated;
-    bundle.summary.push(
-      paperText.truncated ? "全文（已截断）" : "全文",
-    );
+    bundle.summary.push(paperText.truncated ? "全文（已截断）" : "全文");
   }
+
+  if (getPref("sendSI")) {
+    bundle.supportingInfo = await getSupportingInfo(itemID);
+    if (bundle.supportingInfo.length) {
+      const names = bundle.supportingInfo.map((d) => d.name).join("、");
+      bundle.summary.push(`SI ${bundle.supportingInfo.length} 份`);
+      Zotero.debug(`[Highlight Ask] SI attached: ${names}`);
+    }
+  }
+
+  // Rough per-source sizes, so the panel can show what a question will cost.
+  const sizes: Array<{ label: string; chars: number }> = [
+    { label: "选中片段", chars: selection.length },
+  ];
+  if (bundle.nearby) {
+    sizes.push({ label: "相邻段落", chars: bundle.nearby.length });
+  }
+  if (bundle.annotations.length) {
+    sizes.push({
+      label: `标注 ${bundle.annotations.length} 条`,
+      chars: formatAnnotations(bundle.annotations).length,
+    });
+  }
+  if (bundle.notes.length) {
+    sizes.push({
+      label: `笔记 ${bundle.notes.length} 篇`,
+      chars: bundle.notes.reduce((n, x) => n + x.length, 0),
+    });
+  }
+  for (const doc of bundle.supportingInfo) {
+    sizes.push({ label: `SI：${doc.name}`, chars: doc.chars });
+  }
+  if (bundle.fullText) {
+    sizes.push({ label: "全文", chars: bundle.fullText.length });
+  }
+  bundle.sizes = sizes;
 
   return bundle;
 }
 
-/** Re-export for callers that only need the trimming helper. */
-export { trimFullText };
+/** Total estimated tokens for a bundle, and a per-source breakdown. */
+export function bundleSize(bundle: ContextBundle): {
+  tokens: number;
+  parts: Array<{ label: string; tokens: number }>;
+} {
+  const parts = bundle.sizes.map((s) => ({
+    label: s.label,
+    tokens: Math.round(s.chars / 3),
+  }));
+  return {
+    tokens: parts.reduce((n, p) => n + p.tokens, 0),
+    parts,
+  };
+}

@@ -10,7 +10,7 @@ import { renderMarkdown, type RenderOptions } from "./markdown";
 import { installKatexStyles, renderMathInto } from "./katex";
 import { getPref } from "../utils/prefs";
 import { getPaperText, describePaperText, type PaperText } from "./fulltext";
-import { buildContext, type ContextBundle } from "./context";
+import { buildContext, bundleSize, type ContextBundle } from "./context";
 import {
   appendTurn,
   loadLatestSession,
@@ -275,6 +275,14 @@ export function createChatView(options: ChatViewOptions): ChatView {
     if (wantFullText && paperText?.truncated) {
       contextLine.textContent += "（中间部分已截断）";
     }
+    // Show the size, because the gap between "selection" and "whole book" is a
+    // factor of ~50 in cost and only the reader can judge if it is worth it.
+    if (lastContext) {
+      const { tokens } = bundleSize(lastContext);
+      if (tokens > 0) {
+        contextLine.textContent += ` · 约 ${tokens.toLocaleString()} tokens`;
+      }
+    }
   }
 
   function providerKey(): string {
@@ -311,6 +319,7 @@ export function createChatView(options: ChatViewOptions): ChatView {
     fullText?: string;
     annotations?: string;
     notes?: string[];
+    supportingInfo?: Array<{ name: string; text: string }>;
     title?: string;
   }> {
     const bundle = await buildContext({
@@ -320,6 +329,7 @@ export function createChatView(options: ChatViewOptions): ChatView {
       paperText,
     });
     lastContext = bundle;
+    paintContextLine();
     return {
       nearby: bundle.nearby,
       fullText: bundle.fullText,
@@ -327,6 +337,9 @@ export function createChatView(options: ChatViewOptions): ChatView {
         ? formatAnnotationsForPrompt(bundle)
         : undefined,
       notes: bundle.notes.length ? bundle.notes : undefined,
+      supportingInfo: bundle.supportingInfo.length
+        ? bundle.supportingInfo.map((d) => ({ name: d.name, text: d.text }))
+        : undefined,
       title: session.title,
     };
   }
