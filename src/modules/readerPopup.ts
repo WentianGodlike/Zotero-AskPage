@@ -1,5 +1,5 @@
 import { QUICK_ACTIONS, resolveTaskPrompt } from "./prompts";
-import { openAskPanel, closePanel } from "./askPanel";
+import { askInSidebar } from "./sidebar";
 
 /**
  * Reader integration: add buttons to Zotero's text-selection popup.
@@ -87,11 +87,6 @@ export function registerReaderPopup(): void {
 export function unregisterReaderPopup(): void {
   // `_unregisterEventListenerByPluginID` runs on shutdown; being explicit here
   // keeps hot-reload during development from stacking handlers.
-  try {
-    closePanel();
-  } catch {
-    /* ignore */
-  }
   if (!handler) {
     return;
   }
@@ -165,15 +160,23 @@ function wireButtons(
       if (!doc) {
         return;
       }
-      openAskPanel({
-        reader,
-        doc,
+      const question = resolveTaskPrompt(action);
+      const delivered = askInSidebar({
+        itemID: reader.itemID,
         selection,
-        // The task prompt is user-editable, so resolve it at click time rather
-        // than baking the built-in default into the button.
-        question: resolveTaskPrompt(action),
+        question,
       });
-      // Dismiss Zotero's own popup so it does not overlap our panel.
+      if (!delivered) {
+        // The sidebar section only exists while a reader tab is mounted. When it
+        // is not ready yet, say so instead of failing silently.
+        new ztoolkit.ProgressWindow("Highlight Ask", { closeOnClick: true })
+          .createLine({
+            text: "侧边栏还没准备好，请打开右侧边栏的「AI 助手」后再试。",
+            type: "fail",
+          })
+          .show();
+      }
+      // Dismiss Zotero's own popup so it does not overlap the sidebar.
       dismissSelectionPopup(doc);
     });
   });

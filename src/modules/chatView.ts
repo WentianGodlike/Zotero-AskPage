@@ -1,0 +1,930 @@
+import { streamChat, DeepSeekError, type ChatMessage } from "./deepseek";
+import {
+  buildFollowUpMessages,
+  buildInitialMessages,
+  extractNearby,
+} from "./prompts";
+import { renderMarkdown } from "./markdown";
+import { getPref } from "../utils/prefs";
+import { getPaperText, describePaperText, type PaperText } from "./fulltext";
+import {
+  appendTurn,
+  loadLatestSession,
+  makeSessionId,
+  persistSession,
+  type Session,
+} from "./notes";
+import { logRequest } from "./requestLog";
+
+/**
+ * The conversation UI.
+ *
+ * Deliberately host-agnostic: it renders into whatever element it is given and
+ * never assumes a floating panel. The reader sidebar is the primary host; a
+ * floating panel reuses the exact same code, so the two can never drift.
+ *
+ * Everything the caller must supply is in `ChatViewOptions`; the view owns the
+ * message list, streaming, context assembly and archiving from there.
+ */
+
+const STYLE_ID_PREFIX = "ha-chat-styles";
+
+export interface ChatViewHooks {
+  /** Called after each turn is archived, so the host can show a summary. */
+  onTurnArchived?: (session: Session) => void;
+  /** Called when the view wants a short status message shown. */
+  onStatus?: (message: string, kind?: "info" | "error") => void;
+}
+
+export interface ChatViewOptions {
+  /** Element the chat is rendered into. It is emptied first. */
+  container: HTMLElement;
+  /** Document owning `container`, for element creation and clipboard access. */
+  doc: Document;
+  /** The paper's Zotero item id. */
+  itemID: number;
+  /** Seed selection, e.g. from the reader's selection popup. */
+  selection?: string;
+  /** Seed question; when present the first request fires immediately. */
+  question?: string;
+  /** Rather than sending, prefill the input with `question`. */
+  manual?: boolean;
+  hooks?: ChatViewHooks;
+}
+
+export interface ChatView {
+  /** Ask a new question (used by the reader selection popup). */
+  ask(selection: string, question: string): void;
+  /** Put a question in the input box without sending it. */
+  prefill(question: string): void;
+  /** Re-run the most recent question (after a failure). */
+  retry(): void;
+  /** Tear down: aborts any in-flight request and clears the container. */
+  destroy(): void;
+  /** True when a request is currently streaming. */
+  readonly busy: boolean;
+}
+
+export function createChatView(options: ChatViewOptions): ChatView {
+  const { container, doc, itemID, hooks } = options;
+  let seedSelection = (options.selection || "").trim();
+  let seedQuestion = options.question || "";
+
+  ensureStyles(doc);
+  container.replaceChildren();
+
+  /* ---------------------------------------------------------------- */
+  /* DOM                                                               */
+  /* ---------------------------------------------------------------- */
+
+  const root = doc.createElement("div");
+  root.className = "ha-chat";
+
+  const head = doc.createElement("div");
+  head.className = "ha-chat-head";
+
+  const title = doc.createElement("span");
+  title.className = "ha-chat-title";
+  title.textContent = "Highlight Ask";
+
+  const spacer = doc.createElement("span");
+  spacer.className = "ha-chat-spacer";
+
+  const fullTextBtn = mkButton(doc, "全文", "把论文全文一起发给模型（更准，但更贵）");
+  fullTextBtn.classList.add("ha-chat-toggle");
+  let wantFullText = Boolean(getPref("sendFullText"));
+
+  const copyBtn = mkButton(doc, "复制", "复制最近的回答");
+  const clearBtn = mkButton(doc, "清空", "开始一段新对话（已存档的内容不受影响）");
+
+  head.append(title, spacer, fullTextBtn, copyBtn, clearBtn);
+
+  const contextLine = doc.createElement("div");
+  contextLine.className = "ha-chat-context";
+
+  // Selection preview: only shown once something is selected, so the empty
+  // state is not dominated by an empty box.
+  const quoteLabel = doc.createElement("div");
+  quoteLabel.className = "ha-chat-quote-label";
+  quoteLabel.textContent = "选中内容";
+  const quoteBody = doc.createElement("div");
+  quoteBody.className = "ha-chat-quote-body";
+  const quote = doc.createElement("div");
+  quote.className = "ha-chat-quote";
+  quote.append(quoteLabel, quoteBody);
+  quote.hidden = true;
+
+  const convo = doc.createElement("div");
+  convo.className = "ha-chat-convo";
+
+  const empty = doc.createElement("div");
+  empty.className = "ha-chat-empty";
+  empty.append(
+    textBlock(doc, "在 PDF 里划选一段文字，然后点「解释这段」等按钮。"),
+    textBlock(doc, "也可以直接在下面输入问题。"),
+  );
+  convo.appendChild(empty);
+
+  const input = doc.createElement("textarea");
+  input.className = "ha-chat-input";
+  input.rows = 2;
+  input.placeholder = "问点什么…（Enter 发送，Shift+Enter 换行）";
+
+  const sendBtn = mkButton(doc, "发送", "发送");
+  sendBtn.classList.add("ha-chat-send");
+
+  const inputRow = doc.createElement("div");
+  inputRow.className = "ha-chat-input-row";
+  inputRow.append(input, sendBtn);
+
+  root.append(head, quote, contextLine, convo, inputRow);
+  container.appendChild(root);
+
+  /* ---------------------------------------------------------------- */
+  /* State                                                             */
+  /* ---------------------------------------------------------------- */
+
+  let history: ChatMessage[] = [];
+  let abort: AbortController | null = null;
+  let busy = false;
+  let destroyed = false;
+  let lastAnswer = "";
+  /** Everything needed to re-issue the last request. */
+  let lastQuestion: { text: string; echo: string; messages: ChatMessage[] } | null =
+    null;
+
+  let paperText: PaperText | null = null;
+  let paperTextResolved = false;
+
+  const session: Session = {
+    id: makeSessionId(itemID),
+    itemID,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    turns: [],
+  };
+
+  /* ---------------------------------------------------------------- */
+  /* Helpers                                                           */
+  /* ---------------------------------------------------------------- */
+
+  function scrollToBottom() {
+    convo.scrollTop = convo.scrollHeight;
+  }
+
+  function removeEmptyState() {
+    empty.remove();
+  }
+
+  function appendBubble(role: "user" | "assistant", text: string) {
+    removeEmptyState();
+    const wrap = doc.createElement("div");
+    wrap.className = `ha-chat-bubble ha-chat-${role}`;
+    const body = doc.createElement("div");
+    body.className = "ha-chat-bubble-body";
+    if (role === "user") {
+      body.textContent = text;
+    }
+    wrap.appendChild(body);
+    convo.appendChild(wrap);
+    scrollToBottom();
+    return { wrap, body };
+  }
+
+  function appendError(message: string, canRetry: boolean) {
+    removeEmptyState();
+    const box = doc.createElement("div");
+    box.className = "ha-chat-error";
+    box.textContent = message;
+    if (canRetry) {
+      const retryBtn = mkButton(doc, "重试", "用同样的问题再试一次");
+      retryBtn.classList.add("ha-chat-retry");
+      retryBtn.addEventListener("click", () => {
+        box.remove();
+        retry();
+      });
+      box.appendChild(retryBtn);
+    }
+    convo.appendChild(box);
+    scrollToBottom();
+  }
+
+  function setBusy(next: boolean) {
+    busy = next;
+    sendBtn.textContent = next ? "停止" : "发送";
+    sendBtn.title = next ? "停止生成" : "发送";
+    sendBtn.classList.toggle("ha-chat-stop", next);
+    input.disabled = next;
+  }
+
+  function setQuote(text: string) {
+    const value = (text || "").trim();
+    quoteBody.textContent = value;
+    quote.hidden = !value;
+  }
+
+  function paintFullTextBtn() {
+    fullTextBtn.classList.toggle("ha-chat-on", wantFullText);
+    fullTextBtn.title = wantFullText
+      ? "已附带全文，点击关闭"
+      : "把论文全文一起发给模型（更准，但更贵）";
+  }
+
+  function paintContextLine() {
+    const bits = ["选中片段"];
+    if (getPref("sendNearby") && paperText?.text) {
+      bits.push("相邻段落");
+    }
+    if (wantFullText) {
+      bits.push(`全文（${describePaperText(paperText)}）`);
+    }
+    contextLine.textContent = `上下文：${bits.join(" + ")}`;
+    contextLine.classList.toggle(
+      "ha-chat-warn",
+      wantFullText && !paperText?.chars,
+    );
+  }
+
+  function providerKey(): string {
+    try {
+      return String(getPref("provider") || "deepseek");
+    } catch {
+      return "deepseek";
+    }
+  }
+
+  function modelName(): string {
+    try {
+      return String(getPref("model") || "");
+    } catch {
+      return "";
+    }
+  }
+
+  function usedFullTextChars(): number {
+    return wantFullText && paperText ? paperText.chars : 0;
+  }
+
+  function firstTurnContext() {
+    const nearby = getPref("sendNearby")
+      ? extractNearby(paperText?.text || "", seedSelection)
+      : "";
+    return {
+      nearby: nearby || undefined,
+      fullText: wantFullText ? paperText?.text || undefined : undefined,
+      title: session.title,
+    };
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* Paper text and prior conversation                                 */
+  /* ---------------------------------------------------------------- */
+
+  async function loadPaperText() {
+    if (paperTextResolved) {
+      return;
+    }
+    paperTextResolved = true;
+    try {
+      paperText = await getPaperText(itemID);
+      try {
+        const item = await Zotero.Items.getAsync(itemID);
+        session.title = item?.getField?.("title") || undefined;
+      } catch {
+        /* the title is optional grounding */
+      }
+    } catch (e) {
+      Zotero.debug(
+        `[Highlight Ask] paper text unavailable: ${(e as Error)?.message || e}`,
+      );
+    }
+    paintContextLine();
+  }
+
+  /**
+   * Restore the most recent archived conversation for this paper.
+   *
+   * Reading the JSON mirror rather than parsing note HTML keeps this simple and
+   * avoids re-deriving structure from markup.
+   */
+  async function loadPreviousSession() {
+    try {
+      const previous = await loadLatestSession(itemID);
+      if (!previous || !previous.turns.length) {
+        return;
+      }
+      session.noteItemID = previous.noteItemID;
+      session.title ||= previous.title;
+
+      for (const turn of previous.turns) {
+        if (turn.question) {
+          appendBubble("user", turn.question);
+        }
+        if (turn.answer) {
+          const { body } = appendBubble("assistant", "");
+          body.replaceChildren(renderMarkdown(turn.answer, doc));
+          const meta = doc.createElement("div");
+          meta.className = "ha-chat-meta";
+          meta.textContent = turn.model ? `${turn.model}` : "";
+          if (meta.textContent) {
+            body.parentElement!.appendChild(meta);
+          }
+        }
+        // Rebuild model context so follow-ups stay coherent.
+        history.push({ role: "user", content: turn.question });
+        history.push({ role: "assistant", content: turn.answer });
+      }
+
+      lastAnswer =
+        previous.turns[previous.turns.length - 1]?.answer || lastAnswer;
+      seedSelection =
+        previous.turns[previous.turns.length - 1]?.selection || seedSelection;
+      setQuote(seedSelection);
+
+      const notice = doc.createElement("div");
+      notice.className = "ha-chat-restored";
+      notice.textContent = `已载入 ${previous.turns.length} 轮历史对话`;
+      convo.insertBefore(notice, convo.firstChild);
+      scrollToBottom();
+    } catch (e) {
+      Zotero.debug(
+        `[Highlight Ask] could not restore history: ${(e as Error)?.message || e}`,
+      );
+    }
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* Asking                                                            */
+  /* ---------------------------------------------------------------- */
+
+  async function ask(
+    messages: ChatMessage[],
+    echoQuestion: string,
+    record?: { text: string },
+  ) {
+    if (busy || destroyed) {
+      return;
+    }
+    if (echoQuestion) {
+      appendBubble("user", echoQuestion);
+    }
+
+    const { wrap: answerWrap, body: answerBody } = appendBubble("assistant", "");
+    answerBody.classList.add("ha-chat-streaming");
+    answerBody.textContent = "思考中…";
+
+    const showReasoning = Boolean(getPref("showReasoning"));
+    let reasoningBox: HTMLDetailsElement | null = null;
+    let reasoningText = "";
+
+    const renderReasoning = (text: string) => {
+      reasoningText = text;
+      if (!showReasoning || !text) {
+        return;
+      }
+      if (!reasoningBox) {
+        const pre = doc.createElement("div");
+        pre.className = "ha-chat-reasoning-body";
+        const summary = doc.createElement("summary");
+        summary.textContent = "推理过程";
+        reasoningBox = doc.createElement("details");
+        reasoningBox.className = "ha-chat-reasoning";
+        reasoningBox.open = true;
+        reasoningBox.append(summary, pre);
+        answerWrap.insertBefore(reasoningBox, answerBody);
+      }
+      reasoningBox.querySelector(".ha-chat-reasoning-body")!.textContent = text;
+      scrollToBottom();
+    };
+
+    abort = new AbortController();
+    setBusy(true);
+
+    const startedAt = Date.now();
+    let firstTokenMs: number | undefined;
+
+    try {
+      const result = await streamChat({
+        messages,
+        signal: abort.signal,
+        onDelta: (full) => {
+          firstTokenMs ??= Date.now() - startedAt;
+          answerBody.classList.remove("ha-chat-streaming");
+          answerBody.replaceChildren(renderMarkdown(full, doc));
+          scrollToBottom();
+        },
+        onReasoning: renderReasoning,
+      });
+
+      lastAnswer = result.content;
+      history = [...messages, { role: "assistant", content: result.content }];
+      lastQuestion = null;
+
+      if (result.usage) {
+        const meta = doc.createElement("div");
+        meta.className = "ha-chat-meta";
+        meta.textContent = `${result.usage.total_tokens} tokens`;
+        answerWrap.appendChild(meta);
+      }
+
+      void archiveTurn({
+        question: record?.text || echoQuestion,
+        answer: result.content,
+        reasoning: reasoningText || undefined,
+        selection: seedSelection,
+        tokens: result.usage?.total_tokens,
+      });
+
+      void logRequest({
+        ts: new Date().toISOString(),
+        sessionId: session.id,
+        itemID,
+        provider: providerKey(),
+        model: modelName(),
+        firstTokenMs,
+        totalMs: Date.now() - startedAt,
+        promptTokens: result.usage?.prompt_tokens,
+        completionTokens: result.usage?.completion_tokens,
+        totalTokens: result.usage?.total_tokens,
+        selectionChars: seedSelection.length,
+        questionChars: (record?.text || echoQuestion).length,
+        fullTextChars: usedFullTextChars(),
+        hasReasoning: Boolean(reasoningText),
+      });
+    } catch (e) {
+      const err = e as DeepSeekError;
+      if (err?.kind === "aborted") {
+        answerBody.classList.remove("ha-chat-streaming");
+        answerBody.textContent = lastAnswer || "（已停止）";
+      } else {
+        answerWrap.remove();
+        // Keep the failed request so the retry button can re-issue it.
+        lastQuestion = record
+          ? { text: record.text, echo: echoQuestion, messages }
+          : null;
+        appendError(err?.message || String(e), Boolean(err?.retryable));
+      }
+
+      void logRequest({
+        ts: new Date().toISOString(),
+        sessionId: session.id,
+        itemID,
+        provider: providerKey(),
+        model: modelName(),
+        firstTokenMs,
+        totalMs: Date.now() - startedAt,
+        selectionChars: seedSelection.length,
+        questionChars: (record?.text || echoQuestion).length,
+        fullTextChars: usedFullTextChars(),
+        error: err?.message || String(e),
+        errorKind: err?.kind,
+      });
+    } finally {
+      abort = null;
+      setBusy(false);
+      if (!destroyed) {
+        input.focus();
+      }
+    }
+  }
+
+  async function archiveTurn(turn: {
+    question: string;
+    answer: string;
+    reasoning?: string;
+    selection: string;
+    tokens?: number;
+  }) {
+    try {
+      const updated = appendTurn(session, {
+        ...turn,
+        ts: new Date().toISOString(),
+        model: modelName(),
+      });
+      session.turns = updated.turns;
+      session.updatedAt = updated.updatedAt;
+      await persistSession(session);
+      hooks?.onTurnArchived?.(session);
+    } catch (e) {
+      Zotero.debug(
+        `[Highlight Ask] archiving failed: ${(e as Error)?.message || e}`,
+      );
+    }
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* Public actions                                                    */
+  /* ---------------------------------------------------------------- */
+
+  function submit() {
+    const text = input.value.trim();
+    if (!text) {
+      return;
+    }
+    input.value = "";
+    resizeInput();
+
+    if (history.length === 0) {
+      const messages = buildInitialMessages(seedSelection, text, firstTurnContext());
+      history = messages;
+      void ask(messages, text, { text });
+    } else {
+      const messages = buildFollowUpMessages(history, text);
+      history = messages;
+      void ask(messages, text, { text });
+    }
+  }
+
+  function retry() {
+    if (busy || !lastQuestion) {
+      return;
+    }
+    const pending = lastQuestion;
+    lastQuestion = null;
+    void ask(pending.messages, pending.echo, { text: pending.text });
+  }
+
+  function resizeInput() {
+    input.style.height = "auto";
+    input.style.height = `${Math.min(input.scrollHeight, 160)}px`;
+  }
+
+  function destroy() {
+    destroyed = true;
+    abort?.abort();
+    abort = null;
+    container.replaceChildren();
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* Wiring                                                            */
+  /* ---------------------------------------------------------------- */
+
+  fullTextBtn.addEventListener("click", () => {
+    wantFullText = !wantFullText;
+    paintFullTextBtn();
+    paintContextLine();
+    if (wantFullText && !paperText?.chars) {
+      void loadPaperText();
+    }
+  });
+
+  copyBtn.addEventListener("click", () => {
+    if (!lastAnswer) {
+      flash(copyBtn, "暂无回答");
+      return;
+    }
+    try {
+      Zotero.Utilities.Internal.copyTextToClipboard(lastAnswer);
+      flash(copyBtn, "已复制");
+    } catch (e) {
+      Zotero.logError(e as Error);
+      flash(copyBtn, "复制失败");
+    }
+  });
+
+  clearBtn.addEventListener("click", () => {
+    // Archiving is already done per turn, so this only resets the view.
+    history = [];
+    lastAnswer = "";
+    lastQuestion = null;
+    convo.replaceChildren(empty);
+    convo.appendChild(empty);
+    session.turns = [];
+    session.id = makeSessionId(itemID);
+    session.noteItemID = undefined;
+    hooks?.onStatus?.("已开始新对话");
+  });
+
+  input.addEventListener("input", resizeInput);
+  input.addEventListener("keydown", (e: KeyboardEvent) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      if (!busy) {
+        submit();
+      }
+    }
+  });
+  sendBtn.addEventListener("click", () => {
+    if (busy) {
+      abort?.abort();
+      return;
+    }
+    submit();
+  });
+
+  /* ---------------------------------------------------------------- */
+  /* Boot                                                              */
+  /* ---------------------------------------------------------------- */
+
+  paintFullTextBtn();
+  paintContextLine();
+  setQuote(seedSelection);
+  void loadPaperText().then(() => loadPreviousSession());
+
+  if (options.manual && seedQuestion) {
+    input.value = seedQuestion;
+    input.focus();
+  } else if (seedQuestion) {
+    const messages = buildInitialMessages(
+      seedSelection,
+      seedQuestion,
+      firstTurnContext(),
+    );
+    history = messages;
+    void ask(messages, seedQuestion, { text: seedQuestion });
+  }
+
+  return {
+    ask(selection: string, question: string) {
+      seedSelection = (selection || "").trim();
+      setQuote(seedSelection);
+      const messages = history.length
+        ? buildFollowUpMessages(
+            history,
+            `${question}\n\n（新选中的片段：\n"""\n${seedSelection}\n"""\n）`,
+          )
+        : buildInitialMessages(seedSelection, question, firstTurnContext());
+      history = messages;
+      void ask(messages, question, { text: question });
+    },
+    prefill(question: string) {
+      input.value = question;
+      input.focus();
+    },
+    retry,
+    destroy,
+    get busy() {
+      return busy;
+    },
+  };
+}
+
+/* ------------------------------------------------------------------ */
+/* Small DOM helpers                                                   */
+/* ------------------------------------------------------------------ */
+
+function textBlock(doc: Document, text: string): HTMLElement {
+  const p = doc.createElement("p");
+  p.textContent = text;
+  return p;
+}
+
+function mkButton(doc: Document, label: string, title: string): HTMLElement {
+  const btn = doc.createElement("button");
+  btn.className = "ha-chat-btn";
+  btn.type = "button";
+  btn.textContent = label;
+  btn.title = title;
+  return btn;
+}
+
+function flash(btn: HTMLElement, text: string) {
+  const original = btn.dataset.haLabel || btn.textContent || "";
+  btn.dataset.haLabel = original;
+  btn.textContent = text;
+  setTimeout(() => {
+    btn.textContent = original;
+  }, 1200);
+}
+
+/* ------------------------------------------------------------------ */
+/* Styles                                                              */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Injected once per document. Class names are prefixed `ha-chat-` so the
+ * sidebar and a floating panel can coexist without collisions.
+ */
+export function ensureStyles(doc: Document) {
+  if (doc.getElementById(STYLE_ID_PREFIX)) {
+    return;
+  }
+  const style = doc.createElement("style");
+  style.id = STYLE_ID_PREFIX;
+  style.textContent = CSS;
+  (doc.head || doc.documentElement)?.appendChild(style);
+}
+
+const CSS = `
+.ha-chat {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  color: var(--fill-primary, #1f2329);
+  font: 13px/1.7 -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+}
+.ha-chat * { box-sizing: border-box; }
+
+.ha-chat-head {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 8px;
+  flex: 0 0 auto;
+  border-bottom: 1px solid var(--fill-quinary, #e8ebf0);
+}
+.ha-chat-title { font-weight: 700; font-size: 12px; color: #2f6feb; }
+.ha-chat-spacer { flex: 1; }
+
+.ha-chat-btn {
+  border: 0;
+  background: var(--fill-quinary, #eceff4);
+  color: var(--fill-secondary, #374151);
+  border-radius: 6px;
+  padding: 3px 8px;
+  font-size: 11.5px;
+  font-family: inherit;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.ha-chat-btn:hover { background: var(--fill-quaternary, #dfe4ec); }
+.ha-chat-toggle.ha-chat-on { background: #2f6feb; color: #fff; }
+.ha-chat-send {
+  background: #2f6feb;
+  color: #fff;
+  padding: 6px 14px;
+  font-size: 12.5px;
+}
+.ha-chat-send:hover { background: #245bd0; }
+.ha-chat-send.ha-chat-stop { background: #d9534f; }
+
+.ha-chat-quote {
+  flex: 0 0 auto;
+  max-height: 88px;
+  overflow: auto;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--fill-quinary, #eef0f4);
+}
+.ha-chat-quote-label { font-size: 11px; color: #8a93a0; margin-bottom: 2px; }
+.ha-chat-quote-body {
+  font-size: 12px;
+  color: var(--fill-secondary, #5b6472);
+  white-space: pre-wrap;
+  word-break: break-word;
+  border-left: 3px solid #d5dbe5;
+  padding-left: 8px;
+}
+
+.ha-chat-context {
+  flex: 0 0 auto;
+  padding: 3px 10px;
+  font-size: 11px;
+  color: #8a93a0;
+  border-bottom: 1px solid var(--fill-quinary, #eef0f4);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ha-chat-context.ha-chat-warn { color: #b45309; }
+
+.ha-chat-convo {
+  flex: 1 1 auto;
+  overflow: auto;
+  padding: 10px;
+  min-height: 80px;
+}
+
+.ha-chat-empty { color: #9aa3b0; font-size: 12px; }
+.ha-chat-empty p { margin: 0 0 8px; }
+
+.ha-chat-restored {
+  font-size: 11px;
+  color: #9aa3b0;
+  text-align: center;
+  margin-bottom: 10px;
+}
+
+.ha-chat-bubble { margin-bottom: 10px; }
+.ha-chat-user .ha-chat-bubble-body {
+  background: var(--fill-quinary, #eef3ff);
+  border-radius: 8px;
+  padding: 6px 10px;
+  color: var(--fill-primary, #22315a);
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 12.5px;
+}
+.ha-chat-assistant .ha-chat-bubble-body { padding: 0 2px; }
+.ha-chat-bubble-body.ha-chat-streaming { color: #8a93a0; }
+
+.ha-chat-error {
+  background: #fff4f4;
+  border: 1px solid #ffd9d9;
+  color: #a12a2a;
+  border-radius: 8px;
+  padding: 8px 10px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  margin-bottom: 10px;
+  font-size: 12.5px;
+}
+.ha-chat-retry { margin-top: 8px; }
+
+.ha-chat-meta { font-size: 11px; color: #9aa3b0; margin: -6px 0 10px; }
+
+.ha-chat-reasoning {
+  background: var(--fill-quinary, #f8f9fb);
+  border: 1px dashed #dde2ea;
+  border-radius: 8px;
+  padding: 6px 10px;
+  margin-bottom: 10px;
+  font-size: 12px;
+  color: #6b7280;
+}
+.ha-chat-reasoning > summary { cursor: pointer; font-size: 11.5px; user-select: none; }
+.ha-chat-reasoning-body {
+  white-space: pre-wrap;
+  word-break: break-word;
+  margin-top: 6px;
+  max-height: 200px;
+  overflow: auto;
+}
+
+.ha-chat-input-row {
+  flex: 0 0 auto;
+  display: flex;
+  gap: 6px;
+  align-items: flex-end;
+  padding: 8px;
+  border-top: 1px solid var(--fill-quinary, #eef0f4);
+}
+.ha-chat-input {
+  flex: 1;
+  resize: none;
+  border: 1px solid var(--fill-quaternary, #dde2ea);
+  border-radius: 8px;
+  padding: 6px 9px;
+  font: inherit;
+  font-size: 12.5px;
+  outline: none;
+  max-height: 160px;
+  background: var(--material-background, #fff);
+  color: inherit;
+}
+.ha-chat-input:focus { border-color: #2f6feb; }
+
+/* ---- markdown ---- */
+.ha-chat .ha-md p { margin: 0 0 8px; }
+.ha-chat .ha-md p:last-child { margin-bottom: 0; }
+.ha-chat .ha-md h3, .ha-chat .ha-md h4,
+.ha-chat .ha-md h5, .ha-chat .ha-md h6 { margin: 12px 0 6px; font-size: 13.5px; }
+.ha-chat .ha-md ul, .ha-chat .ha-md ol { margin: 0 0 8px; padding-left: 20px; }
+.ha-chat .ha-md li { margin-bottom: 3px; }
+.ha-chat .ha-md blockquote {
+  margin: 0 0 8px;
+  padding: 4px 10px;
+  border-left: 3px solid #d5dbe5;
+  color: var(--fill-secondary, #5b6472);
+}
+.ha-chat .ha-md hr { border: 0; border-top: 1px solid #eef0f4; margin: 10px 0; }
+.ha-chat .ha-md a { color: #2f6feb; text-decoration: none; }
+.ha-chat .ha-md strong { font-weight: 700; }
+
+.ha-chat .ha-md-inline-code {
+  background: #f2f4f8;
+  border-radius: 4px;
+  padding: 0 4px;
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 12px;
+  color: #b1305a;
+}
+.ha-chat .ha-code {
+  position: relative;
+  background: var(--fill-quinary, #f7f8fa);
+  border-radius: 8px;
+  padding: 8px 10px;
+  margin: 0 0 8px;
+  overflow: auto;
+}
+.ha-chat .ha-code pre { margin: 0; }
+.ha-chat .ha-code code {
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 12px;
+  white-space: pre;
+}
+.ha-chat .ha-code-lang { position: absolute; top: 4px; right: 8px; font-size: 10px; color: #a8b0bd; }
+
+.ha-chat .ha-math-inline {
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 12.2px;
+  background: #f3f0fb;
+  border-radius: 4px;
+  padding: 0 4px;
+  color: #5b3fa8;
+}
+.ha-chat .ha-math-block {
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 12.2px;
+  background: #f3f0fb;
+  border-radius: 8px;
+  padding: 8px 10px;
+  margin: 0 0 8px;
+  color: #5b3fa8;
+  white-space: pre-wrap;
+  word-break: break-word;
+  text-align: center;
+  overflow-x: auto;
+}
+`;
