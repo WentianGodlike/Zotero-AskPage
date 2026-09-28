@@ -1,6 +1,7 @@
 import { extractNearby, trimFullText } from "./prompts";
 import { getPaperText, type PaperText } from "./fulltext";
 import { getPref } from "../utils/prefs";
+import { locatePassage, rankChunks, formatRetrieved } from "./retrieval";
 
 /**
  * Assembling what the model gets to see.
@@ -141,6 +142,14 @@ export interface ContextBundle {
   fullTextTruncated: boolean;
   /** Supporting Information documents attached to the same item. */
   supportingInfo: SupportingInfoDoc[];
+  /**
+   * Passages retrieved from a document too long to send whole.
+   *
+   * Full text was previously truncated head-and-tail, which silently discarded
+   * the middle — so asking about chapter 1 while reading chapter 8 was
+   * impossible, and the model was blamed for it.
+   */
+  retrieved?: string;
   /** Human-readable summary of what was actually included. */
   summary: string[];
   /**
@@ -433,6 +442,13 @@ export interface BuildContextOptions {
   annotations?: boolean;
   /** Already-fetched paper text, to avoid a second lookup. */
   paperText?: PaperText | null;
+  /**
+   * Untruncated document text, used as the retrieval corpus.
+   *
+   * `paperText` may be trimmed to the budget; searching the trimmed version
+   * would miss exactly the parts that were cut.
+   */
+  rawText?: string;
 }
 
 /**
@@ -489,6 +505,28 @@ export async function buildContext(
     bundle.summary.push(paperText.truncated ? "全文（已截断）" : "全文");
   }
 
+  // When the document did not fit, search it instead of giving up on the parts
+  // that were cut. The query is the selected passage, not the question:
+  // questions are usually Chinese while the document is English, so the
+  // question alone would retrieve nothing.
+  if (getPref("retrievePassages") && paperText?.chars) {
+    const raw = options.rawText ?? "";
+    if (raw && raw.length > (paperText.text?.length ?? 0)) {
+      const exclude = locatePassage(raw, selection) ?? undefined;
+      const hits = rankChunks(raw, selection, {
+        topK: Number(getPref("retrieveTopK")) || 5,
+        excludeRange: exclude,
+      });
+      if (hits.length) {
+        bundle.retrieved = formatRetrieved(hits, raw.length);
+        bundle.summary.push(`检索 ${hits.length} 段`);
+        Zotero.debug(
+          `[Highlight Ask] retrieved ${hits.length} passage(s) from ${raw.length} chars`,
+        );
+      }
+    }
+  }
+
   if (getPref("sendSI")) {
     bundle.supportingInfo = await getSupportingInfo(itemID);
     if (bundle.supportingInfo.length) {
@@ -519,6 +557,9 @@ export async function buildContext(
   }
   for (const doc of bundle.supportingInfo) {
     sizes.push({ label: `SI：${doc.name}`, chars: doc.chars });
+  }
+  if (bundle.retrieved) {
+    sizes.push({ label: "检索到的段落", chars: bundle.retrieved.length });
   }
   if (bundle.fullText) {
     sizes.push({ label: "全文", chars: bundle.fullText.length });

@@ -35,6 +35,13 @@ import { HIGHLIGHT_ASK_PROVIDERS } from "../src/data/providers.data";
 import { validateSettings, getProvider } from "../src/modules/providers";
 import { matchesItem } from "../src/modules/sidebar";
 import {
+  chunkText,
+  tokenize,
+  rankChunks,
+  locatePassage,
+  formatRetrieved,
+} from "../src/modules/retrieval";
+import {
   findAnySelection,
   scaleRectToCanvas,
   expandForFormula,
@@ -1232,7 +1239,138 @@ test("non-SVG elements stay in the HTML namespace", () => {
   }
 });
 
-console.log("\nfollow-up messages carry screenshots");
+console.log("\nretrieval: chunking");
+test("short text stays one chunk", () => {
+  const chunks = chunkText("hello world");
+  assert.equal(chunks.length, 1);
+  assert.equal(chunks[0].text, "hello world");
+});
+
+test("long text is split into overlapping chunks", () => {
+  const text = "Paragraph one.\n\n".repeat(200);
+  const chunks = chunkText(text, 400, 80);
+  assert.ok(chunks.length > 1, `expected splitting, got ${chunks.length}`);
+  for (let i = 1; i < chunks.length; i++) {
+    assert.ok(
+      chunks[i].start < chunks[i - 1].end,
+      `chunk ${i} does not overlap the previous one`,
+    );
+  }
+});
+
+test("chunks cover the text without gaps", () => {
+  const text = "abcdefghij".repeat(300);
+  const chunks = chunkText(text, 500, 50);
+  assert.equal(chunks[0].start, 0);
+  assert.equal(chunks[chunks.length - 1].end, text.length);
+});
+
+test("empty text yields no chunks", () => {
+  assert.deepEqual(chunkText(""), []);
+  assert.deepEqual(chunkText("   "), []);
+});
+
+console.log("\nretrieval: tokenization");
+test("drops stopwords that carry no signal", () => {
+  const tokens = tokenize("the model and the data");
+  assert.ok(!tokens.includes("the"));
+  assert.ok(tokens.includes("model"));
+  assert.ok(tokens.includes("data"));
+});
+
+test("stems plurals and common suffixes", () => {
+  // The query passage and the matching passage need not inflect alike.
+  assert.equal(tokenize("regularizations")[0], tokenize("regularization")[0]);
+  assert.equal(tokenize("models")[0], tokenize("model")[0]);
+});
+
+test("splits CJK into bigrams", () => {
+  // No segmenter available, and this also lets a Chinese question match
+  // Chinese notes the reader wrote.
+  const tokens = tokenize("监督学习");
+  assert.ok(tokens.includes("监督"), tokens.join("|"));
+  assert.ok(tokens.includes("督学"), tokens.join("|"));
+});
+
+console.log("\nretrieval: ranking");
+const BOOK = [
+  "Chapter 1. Supervised learning maps inputs to outputs using labelled training data.",
+  "Chapter 2. Shallow networks compose linear transformations with nonlinearities.",
+  "Chapter 3. Deep networks stack many layers and train by backpropagation.",
+  "Chapter 4. Regularization penalises complexity to reduce the generalization gap.",
+].join("\n\n");
+
+test("finds the chunk about the query topic", () => {
+  const hits = rankChunks(BOOK, "supervised learning labelled training data");
+  assert.ok(hits.length > 0);
+  assert.ok(hits[0].text.includes("Chapter 1"), hits[0].text);
+});
+
+test("ranks different topics to different places", () => {
+  const a = rankChunks(BOOK, "backpropagation layers")[0];
+  const b = rankChunks(BOOK, "regularization generalization gap")[0];
+  assert.ok(a.text.includes("Chapter 3"), a.text);
+  assert.ok(b.text.includes("Chapter 4"), b.text);
+});
+
+test("returns nothing for a query with no matching terms", () => {
+  assert.deepEqual(rankChunks(BOOK, "photosynthesis chlorophyll"), []);
+});
+
+test("honours topK", () => {
+  const hits = rankChunks(BOOK, "learning networks data", { topK: 2 });
+  assert.ok(hits.length <= 2);
+});
+
+test("can exclude the passage already being sent", () => {
+  const target = "Chapter 1. Supervised learning maps inputs to outputs using labelled training data.";
+  const range = locatePassage(BOOK, target)!;
+  const hits = rankChunks(BOOK, target, { excludeRange: range });
+  for (const hit of hits) {
+    assert.ok(
+      !hit.text.includes("Chapter 1"),
+      "the passage being sent should not be returned again",
+    );
+  }
+});
+
+console.log("\nretrieval: locating and formatting");
+test("locates an exact passage", () => {
+  const target = "Shallow networks compose";
+  const found = locatePassage(BOOK, target);
+  assert.ok(found, "passage should be found");
+  assert.equal(BOOK.slice(found!.start, found!.start + target.length), target);
+});
+
+test("locates a passage across line breaks", () => {
+  // The text layer inserts breaks, so the selection rarely matches verbatim.
+  const found = locatePassage(BOOK, "Chapter 3.  Deep networks stack");
+  assert.ok(found, "should match with whitespace differences");
+});
+
+test("refuses to locate a passage too short to be meaningful", () => {
+  assert.equal(locatePassage(BOOK, "the"), null);
+});
+
+test("formatting reports each passage's position in the document", () => {
+  const hits = rankChunks(BOOK, "regularization penalises complexity");
+  const out = formatRetrieved(hits, BOOK.length);
+  assert.ok(out.includes("% 处"), out);
+  assert.ok(out.includes("Chapter 4"), out);
+});
+
+test("formatting returns passages in document order, not relevance order", () => {
+  // Reading a derivation in the order the author wrote it is easier.
+  const hits = rankChunks(BOOK, "learning networks data regularization", {
+    topK: 4,
+  });
+  const out = formatRetrieved(hits, BOOK.length);
+  const positions = [...out.matchAll(/全文约 (\d+)% 处/g)].map((m) => Number(m[1]));
+  const sorted = [...positions].sort((a, b) => a - b);
+  assert.deepEqual(positions, sorted, positions.join(","));
+});
+
+
 // A screenshot used to work only for the first question of a session: the first
 // path attached it, and the follow-up path — which never called the assembler —
 // silently dropped it for every later formula.

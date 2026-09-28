@@ -550,6 +550,7 @@ export function createChatView(options: ChatViewOptions): ChatView {
     annotations?: string;
     notes?: string[];
     supportingInfo?: Array<{ name: string; text: string }>;
+    retrieved?: string;
     images?: Array<{ dataUrl: string }>;
     title?: string;
   }> {
@@ -558,6 +559,9 @@ export function createChatView(options: ChatViewOptions): ChatView {
       selection: seedSelection,
       fullText: wantFullText,
       paperText,
+      // The untruncated text is the retrieval corpus: searching the trimmed
+      // version would miss exactly the parts that were cut.
+      rawText: paperText?.raw,
     });
     lastContext = bundle;
     // Attach a screenshot of the selection when there is one stashed. Large
@@ -569,6 +573,7 @@ export function createChatView(options: ChatViewOptions): ChatView {
     return {
       nearby: bundle.nearby,
       fullText: bundle.fullText,
+      retrieved: bundle.retrieved,
       annotations: bundle.annotations.length
         ? formatAnnotationsForPrompt(bundle)
         : undefined,

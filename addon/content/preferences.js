@@ -412,6 +412,8 @@
     $("saveToJson").checked = Boolean(readPref("saveToJson", true));
     $("logRequests").checked = Boolean(readPref("logRequests", true));
     $("debugScreenshot").checked = Boolean(readPref("debugScreenshot", true));
+    $("retrievePassages").checked = Boolean(readPref("retrievePassages", true));
+    $("retrieveTopK").value = String(readPref("retrieveTopK", 5));
     renderPromptFields();
     paintDataDir();
 
@@ -497,6 +499,8 @@
     writePref("saveToJson", $("saveToJson").checked);
     writePref("logRequests", $("logRequests").checked);
     writePref("debugScreenshot", $("debugScreenshot").checked);
+    writePref("retrievePassages", $("retrievePassages").checked);
+    writePref("retrieveTopK", Number($("retrieveTopK").value) || 5);
 
     var maxChars = Number($("fullTextMaxChars").value.trim());
     if (!isFinite(maxChars) || maxChars < 1000) {

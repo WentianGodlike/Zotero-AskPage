@@ -352,6 +352,31 @@
     </details>
 
     <details class="advanced">
+      <summary>长文档检索</summary>
+      <div class="field">
+        <div class="check">
+          <input id="retrievePassages" type="checkbox" />
+          <label for="retrievePassages" style="font-weight: 400; margin: 0">
+            文档过长时检索相关段落，而不是只发开头和结尾
+          </label>
+        </div>
+        <div class="desc">
+          整本书约 40 万 tokens，塞不进上下文。开启后会用<b>你划选的原文</b>在全文里
+          检索最相关的段落一并发送。<br />
+          用选段而不是问题作为检索词：<b>你的提问通常是中文，而文献是英文</b>，
+          中文问题检索不到英文正文。<br />
+          <b>局限</b>：这是词面匹配（BM25），不是语义检索。问"什么是监督学习"
+          而正文写作 "supervised learning" 时，只有问题里出现了英文术语才检索得到。
+        </div>
+      </div>
+      <div class="field">
+        <label for="retrieveTopK">检索段落数</label>
+        <input id="retrieveTopK" type="number" min="1" max="20" step="1" />
+        <div class="desc">每段约 1200 字符；5 段约 6K tokens。</div>
+      </div>
+    </details>
+
+    <details class="advanced">
       <summary>高级：请求参数（JSON）</summary>
       <div class="field">
         <label for="thinkingParams">附加到请求体的字段</label>
