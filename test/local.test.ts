@@ -60,7 +60,7 @@ import {
 import {
   decodeEntities,
   parseHtmlToMathNodes,
-  rewriteFontFaces,
+  keepWoff2FontFaces,
   stripFontFaces,
   latexToNodes,
   buildMathNodes,
@@ -1911,37 +1911,47 @@ test("buildMathNodes needs only a document, no DOM globals", () => {
 });
 
 console.log("\nKaTeX stylesheet");
-test("rewrites font URLs to Zotero's copies", () => {
-  // The bundled CSS says `fonts/...`; Zotero keeps them under assets/fonts/.
-  const css = '@font-face{font-family:KaTeX_Main;src:url(fonts/KaTeX_Main-Regular.woff2)}';
-  const out = rewriteFontFaces(css);
-  assert.ok(
-    out.includes("resource://zotero/note-editor/assets/fonts/KaTeX_Main-Regular.woff2"),
-    out,
-  );
-});
-
-test("keeps both woff2 and woff fallbacks", () => {
+// The fonts ship with the addon. An earlier version pointed the font URLs at
+// Zotero's own copies, whose filenames carry a build-time hash; every request
+// 404'd and formulas fell back to a system serif, which reads as a broken
+// formula rather than a missing font.
+test("trims font sources to woff2, the only format shipped", () => {
   const css =
-    '@font-face{src:url(fonts/a.woff2) format("woff2"),url(fonts/a.woff) format("woff")}';
-  const out = rewriteFontFaces(css);
-  assert.ok(out.includes("assets/fonts/a.woff2"));
-  assert.ok(out.includes("assets/fonts/a.woff"));
+    '@font-face{font-family:KaTeX_Main;src:url(fonts/a.woff2) format("woff2"),' +
+    'url(fonts/a.woff) format("woff"),url(fonts/a.ttf) format("truetype")}';
+  const out = keepWoff2FontFaces(css);
+  assert.ok(out.includes("a.woff2"), out);
+  assert.ok(!out.includes('a.woff)'), out);
+  assert.ok(!out.includes("a.ttf"), out);
 });
 
-test("only font-face blocks are kept by the rewriter", () => {
-  const css = '@font-face{src:url(fonts/a.woff2)}.katex{color:red}';
-  const out = rewriteFontFaces(css);
-  assert.ok(out.includes("@font-face"));
+test("keeps every font face, not just the first", () => {
+  const css =
+    "@font-face{font-family:A;src:url(fonts/a.woff2)}" +
+    "@font-face{font-family:B;src:url(fonts/b.woff2)}";
+  const out = keepWoff2FontFaces(css);
+  assert.equal((out.match(/@font-face/g) || []).length, 2, out);
+});
+
+test("the font-face pass drops layout rules", () => {
+  const css = "@font-face{src:url(fonts/a.woff2)}.katex{color:red}";
+  const out = keepWoff2FontFaces(css);
   assert.ok(!out.includes(".katex"), out);
 });
 
 test("stripFontFaces leaves the layout rules behind", () => {
-  const css = '@font-face{src:url(fonts/a.woff2)}.katex{color:red}.mord{margin:0}';
+  const css = "@font-face{src:url(fonts/a.woff2)}.katex{color:red}.mord{margin:0}";
   const out = stripFontFaces(css);
   assert.ok(!out.includes("@font-face"), out);
   assert.ok(out.includes(".katex"));
   assert.ok(out.includes(".mord"));
+});
+
+test("font URLs stay relative rather than naming Zotero's hashed files", () => {
+  const css = '@font-face{src:url(../assets/fonts/a.woff2) format("woff2")}';
+  const out = keepWoff2FontFaces(css);
+  assert.ok(out.includes("../assets/fonts/a.woff2"), out);
+  assert.ok(!out.includes("resource://"), out);
 });
 
 console.log("\nabort capability");

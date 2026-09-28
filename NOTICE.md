@@ -31,42 +31,17 @@ AGPL-3.0-or-later**（见 `LICENSE`）。
 | [KaTeX](https://katex.org/) | **MIT** | 数学排版。库被 bundle 进 `content/scripts/highlightask.js`，样式表输出为 `content/katex.css`。**不打包字体**——复用 Zotero 笔记编辑器自带的那套（见下）。MIT 与 AGPL-3.0 兼容。 |
 | [zotero-plugin-toolkit](https://github.com/windingwind/zotero-plugin-toolkit) | **MIT** | 被 bundle 进 `content/scripts/highlightask.js`。MIT 与 AGPL-3.0 兼容。 |
 
-### 关于 KaTeX 字体的复用
+### 关于 KaTeX 字体
 
-Zotero 为笔记编辑器自带了 KaTeX 的 20 个 woff2 字体
-（`resource://zotero/note-editor/assets/fonts/`）。插件在运行时把
-`katex.css` 里 `@font-face` 的相对路径改写到该目录，因此**不随包分发字体**，
-XPI 因此小了约 1.2 MB。字形与 Zotero 其余部分保持一致。
+字体**随插件分发**（`addon/assets/fonts/` 下 20 个 woff2，约 254 KB）。
 
-若该目录在将来的 Zotero 版本中变动，公式的**字符仍会正确显示**（文本层是
-真实字符），只是字形回退到系统字体。
+早期版本改为复用 Zotero 笔记编辑器自带的副本，以省下这点体积，但那是错的：
+Zotero 的字体文件名带**构建期内容哈希**（`KaTeX_AMS-Regular.73ea273a.woff2`），
+而按固定名改写出的 URL（`KaTeX_AMS-Regular.woff2`）**一个也不存在**。结果是每个
+字体请求都失败、浏览器回退到系统衬线体，公式的字形变得扁平——看起来像"公式
+渲染坏了"，而不是"字体没加载"。该目录名在 Zotero 各版本间也不稳定，没有可靠的
+名字可以引用。
 
-构建工具链（esbuild、TypeScript、zotero-plugin-scaffold、zotero-types 等）
-仅用于开发，不随插件分发。
-
-## 3. 外部实现参考（无代码复制）
-
-开发过程中**阅读过**以下项目的源码，用于确认 Zotero 的插件 API 用法。
-这些是 API 的**调用方式**（公开接口，非受版权保护的表达），不是实现代码：
-
-| 项目 | 许可 | 我们从中确认了什么 |
-| --- | --- | --- |
-| [zotero-deepseek](https://github.com/Loooookk/zotero-deepseek) | 声明 MIT（仓库内无 LICENSE 文件） | 确认 `Zotero.Reader.registerEventListener("renderTextSelectionPopup", handler, pluginID)` 的签名，以及 `params.annotation.text` / `reader._iframeWindow.getSelection()` 两条取选中文本的路径 |
-| [zotero-pdf-translate](https://github.com/windingwind/zotero-pdf-translate) | AGPL-3.0 | 仅用于比对 `manifest.json` 的兼容性字段写法，并用它做安装对照实验。**未参考其功能实现** |
-| [zotero-plugin-template](https://github.com/windingwind/zotero-plugin-template) | AGPL-3.0 | 见第 1 节 |
-
-最终实现与上述项目均不相同，且修正了参考实现中存在的问题
-（例如：Zotero 的 `append()` 会跨 iframe 克隆节点并**丢弃事件监听器**，
-必须先插入、再在克隆体上绑定；参考实现是"先绑定后插入"）。
-划词弹窗的按钮样式、面板 UI、Markdown 渲染器（零 `innerHTML`）、
-流式 SSE 客户端、厂商预设与配置校验均为本项目独立实现。
-
-## 4. 与 Zotero 官方的关系
-
-本项目是**第三方插件**，与 [Zotero](https://www.zotero.org/) 官方无隶属关系，
-未获其背书。名称中未使用 "Zotero" 商标作为产品标识。
-
-## 5. 用户数据
-
-插件不收集、不上传任何用户数据。API Key 与文献内容仅保存在本机 Zotero 配置中，
-请求由用户的电脑直接发往用户自行配置的模型服务商。
+因此自带字体，换取零外部依赖。`katex.css` 中的 `@font-face` 只保留 woff2 一项
+（woff / ttf 回退会被去掉，因为包里没有那些文件），字体 URL 在构建期改写为相对
+路径 `../assets/fonts/`。
