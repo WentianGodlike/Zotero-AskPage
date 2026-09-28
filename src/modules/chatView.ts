@@ -130,15 +130,38 @@ export function createChatView(options: ChatViewOptions): ChatView {
   // who knows if this question is about a formula, and the token cost is shown
   // in the status line, so this is a plain toggle rather than automatic.
   const imageBtn = mkButton(doc, "带图", "提问时附带选区截图（公式识别用）");
-  imageBtn.classList.toggle("ha-chat-on", wantScreenshot);
-  imageBtn.addEventListener("click", () => {
-    wantScreenshot = !wantScreenshot;
+
+  /**
+   * Paint the toggle's state in three independent ways.
+   *
+   * Belt and braces on purpose: the class-based styling silently failed once
+   * already (a selector that never matched), and a state the reader cannot see
+   * is worse than no toggle. The label and the `data-on` attribute are visible
+   * regardless of whether any stylesheet rule applies.
+   */
+  function paintImageToggle() {
     imageBtn.classList.toggle("ha-chat-on", wantScreenshot);
+    imageBtn.dataset.on = wantScreenshot ? "1" : "0";
+    imageBtn.textContent = wantScreenshot ? "带图 ✓" : "带图 ✗";
     imageBtn.title = wantScreenshot
       ? "提问时会附带选区截图，点此关闭"
-      : "提问时附带选区截图（公式识别用）";
+      : "提问时不会附带截图，点此开启";
+    imageBtn.setAttribute("aria-pressed", wantScreenshot ? "true" : "false");
+  }
+
+  imageBtn.addEventListener("click", () => {
+    wantScreenshot = !wantScreenshot;
+    paintImageToggle();
+    Zotero.debug(`[Highlight Ask] screenshot toggle -> ${wantScreenshot}`);
     paintContextLine();
   });
+  // Also cover a change made in the settings pane while the panel is open.
+  imageBtn.addEventListener("contextmenu", (e) => {
+    e.preventDefault();
+    wantScreenshot = Boolean(getPref("sendScreenshot"));
+    paintImageToggle();
+  });
+  paintImageToggle();
 
   head.append(title, spacer, imageBtn, fullTextBtn, shotBtn, copyBtn, clearBtn);
 
@@ -1086,10 +1109,15 @@ const CSS = `
    silently never matched them — the button looked identical on and off.
    (No backticks in this block: it is inside a template literal.) */
 .ha-chat-toggle.ha-chat-on,
-.ha-chat-btn.ha-chat-on {
+.ha-chat-btn.ha-chat-on,
+.ha-chat-btn[data-on="1"] {
   background: #2f6feb;
   color: #fff;
   border-color: #2f6feb;
+}
+.ha-chat-btn[data-on="0"] {
+  background: var(--fill-quinary, #eceff4);
+  color: var(--fill-secondary, #374151);
 }
 .ha-chat-send {
   background: #2f6feb;
