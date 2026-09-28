@@ -24,6 +24,14 @@ match (see the font-face filter in the build step).
 
 from __future__ import annotations
 
+import sys
+
+if sys.version_info < (3, 8):  # noqa: UP036
+    sys.exit(
+        "This script needs Python 3.8 or newer "
+        f"(running {sys.version.split()[0]})."
+    )
+
 import shutil
 import sys
 from pathlib import Path
@@ -31,7 +39,6 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 SOURCE = ROOT / "node_modules" / "katex" / "dist" / "fonts"
 TARGET = ROOT / "addon" / "assets" / "fonts"
-
 
 def main() -> int:
     if not SOURCE.is_dir():
@@ -58,7 +65,6 @@ def main() -> int:
 
     print(f"copied {len(fonts)} woff2 font(s), {total / 1024:.0f} KB -> {TARGET}")
     return 0
-
 
 if __name__ == "__main__":
     sys.exit(main())

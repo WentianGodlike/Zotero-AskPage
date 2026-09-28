@@ -31,6 +31,21 @@ packaged .ftl files show the real ids.
 Run: python3 scripts/check-pane.py [path/to/preferences.xhtml]
 Exit code 1 on any problem.
 """
+
+from __future__ import annotations
+
+import sys
+
+if sys.version_info < (3, 8):  # noqa: UP036
+    sys.exit(
+        "This script needs Python 3.8 or newer "
+        f"(running {sys.version.split()[0]})."
+    )
+
+# Deferred annotations: the builtin generics below (`list[str]`, `set[str]`)
+# are evaluated at definition time on Python < 3.9 unless annotations are
+# strings, which would break `npm run build` outright on those versions.
+
 import os
 import re
 import sys
@@ -49,7 +64,6 @@ WRAPPER_OPEN = (
     '<div xmlns="http://www.w3.org/1999/xhtml"\n'
     '\t\txmlns:xul="http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul">\n'
 )
-
 
 def main() -> int:
     path = sys.argv[1] if len(sys.argv) > 1 else DEFAULT_PANE
@@ -139,7 +153,6 @@ def main() -> int:
 
     print(f"\nOK — pane markup is valid ({len(warnings)} warning(s))")
     return 0
-
 
 if __name__ == "__main__":
     sys.exit(main())

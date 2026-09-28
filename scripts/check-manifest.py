@@ -15,6 +15,20 @@ have actually broken an install here:
 Run: python3 scripts/check-manifest.py [dist_dir]
 Exit code 1 if anything is wrong.
 """
+
+from __future__ import annotations
+
+import sys
+
+if sys.version_info < (3, 8):  # noqa: UP036
+    sys.exit(
+        "This script needs Python 3.8 or newer "
+        f"(running {sys.version.split()[0]})."
+    )
+
+# Version guard first: on an older interpreter this should produce a readable
+# message rather than a SyntaxError from the syntax below.
+
 import json
 import os
 import struct
@@ -27,7 +41,6 @@ DEFAULT_DIST = os.path.join(
 errors: list[str] = []
 warnings: list[str] = []
 
-
 def png_size(path: str):
     """Read width/height from a PNG IHDR chunk without any dependency."""
     with open(path, "rb") as fh:
@@ -38,7 +51,6 @@ def png_size(path: str):
         return None
     width, height = struct.unpack(">II", head[16:24])
     return width, height
-
 
 def parse_version(text: str):
     """Loose numeric version key, enough to compare 7.9.9 against 10.0.3."""
@@ -54,7 +66,6 @@ def parse_version(text: str):
     while len(parts) < 4:
         parts.append(0)
     return tuple(parts[:4])
-
 
 def main() -> int:
     dist = sys.argv[1] if len(sys.argv) > 1 else DEFAULT_DIST
@@ -160,7 +171,6 @@ def main() -> int:
 
     print(f"\nOK — every compatibility check passed ({len(warnings)} warning(s))")
     return 0
-
 
 if __name__ == "__main__":
     sys.exit(main())

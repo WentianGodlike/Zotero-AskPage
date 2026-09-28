@@ -18,6 +18,21 @@ references at runtime is actually inside it.
 Run: python3 scripts/check-package.py [path/to.xpi]
 Exit code 1 on any problem.
 """
+
+from __future__ import annotations
+
+import sys
+
+if sys.version_info < (3, 8):  # noqa: UP036
+    sys.exit(
+        "This script needs Python 3.8 or newer "
+        f"(running {sys.version.split()[0]})."
+    )
+
+# Deferred annotations: the builtin generics below (`list[str]`, `set[str]`)
+# are evaluated at definition time on Python < 3.9 unless annotations are
+# strings, which would break `npm run build` outright on those versions.
+
 import json
 import os
 import re
@@ -42,7 +57,6 @@ def _find_built_xpi() -> str:
         return str(build / "plugin.xpi")
     return found[0]
 
-
 DEFAULT_XPI = os.path.join(
     os.path.dirname(os.path.abspath(__file__)),
     "..",
@@ -54,7 +68,6 @@ DEFAULT_XPI = os.path.join(
 )
 SRC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "src")
 
-
 def read_sources() -> str:
     """Concatenate all TypeScript sources, for reference extraction."""
     chunks = []
@@ -63,7 +76,6 @@ def read_sources() -> str:
             if name.endswith((".ts", ".tsx")):
                 chunks.append(open(os.path.join(dirpath, name), encoding="utf-8").read())
     return "\n".join(chunks)
-
 
 def main() -> int:
     xpi = os.path.normpath(sys.argv[1] if len(sys.argv) > 1 else DEFAULT_XPI)
@@ -163,7 +175,6 @@ def main() -> int:
 
     print(f"\nOK — package contents are complete ({len(warnings)} warning(s))")
     return 0
-
 
 if __name__ == "__main__":
     sys.exit(main())
