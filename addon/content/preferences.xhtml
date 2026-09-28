@@ -1,0 +1,209 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<html
+  xmlns="http://www.w3.org/1999/xhtml"
+  xmlns:html="http://www.w3.org/1999/xhtml"
+>
+  <head>
+    <title>Highlight Ask</title>
+    <style>
+      * { box-sizing: border-box; }
+      body {
+        font: 14px/1.6 -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+        color: #1f2329;
+        margin: 0;
+        padding: 16px 18px 28px;
+      }
+      h1 { font-size: 17px; color: #2f6feb; margin: 0 0 6px; }
+      .hint { font-size: 12px; color: #6b7280; margin: 0 0 16px; }
+      .hint a, .field a { color: #2f6feb; }
+
+      fieldset {
+        border: 1px solid #e3e7ee;
+        border-radius: 10px;
+        padding: 12px 14px 4px;
+        margin: 0 0 16px;
+        max-width: 620px;
+      }
+      legend {
+        font-size: 12px;
+        font-weight: 600;
+        color: #6b7280;
+        padding: 0 6px;
+      }
+
+      .field { margin-bottom: 14px; max-width: 620px; }
+      .field > label {
+        display: block;
+        font-size: 13px;
+        font-weight: 600;
+        margin-bottom: 4px;
+        color: #374151;
+      }
+      .field .desc { font-size: 12px; color: #8a93a0; margin-top: 4px; }
+      .field .desc.warn { color: #b45309; }
+      .field .desc.ok { color: #15803d; }
+
+      input[type="text"], input[type="password"], select, textarea {
+        width: 100%;
+        padding: 7px 10px;
+        font: inherit;
+        font-size: 13px;
+        border: 1px solid #d6dae1;
+        border-radius: 8px;
+        background: #fff;
+        color: #1f2329;
+      }
+      textarea { font-family: "SFMono-Regular", Consolas, monospace; font-size: 12px; resize: vertical; }
+      input:focus, select:focus, textarea:focus {
+        outline: 2px solid #c3d0ff;
+        border-color: #2f6feb;
+      }
+      input:disabled, select:disabled, textarea:disabled {
+        background: #f4f5f7;
+        color: #9aa3b0;
+      }
+
+      .row { display: flex; gap: 14px; max-width: 620px; }
+      .row .field { flex: 1; }
+
+      .check { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+      .check input { width: auto; }
+
+      .actions {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin-top: 4px;
+        max-width: 620px;
+      }
+      button {
+        font: inherit;
+        font-size: 13px;
+        padding: 7px 16px;
+        border-radius: 8px;
+        cursor: pointer;
+        border: 1px solid #d6dae1;
+        background: #fff;
+        color: #374151;
+        white-space: nowrap;
+      }
+      button:hover { background: #f3f4f6; }
+      button.primary { background: #2f6feb; border-color: #2f6feb; color: #fff; }
+      button.primary:hover { background: #245bd0; }
+      button:disabled { opacity: .55; cursor: default; }
+      button.tiny { padding: 3px 9px; font-size: 12px; }
+
+      .status {
+        flex: 1;
+        font-size: 12px;
+        color: #15803d;
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
+      .status.error { color: #b42318; }
+      .status.busy { color: #6b7280; }
+
+      details.advanced {
+        max-width: 620px;
+        border: 1px solid #e3e7ee;
+        border-radius: 10px;
+        padding: 10px 14px;
+        margin-bottom: 16px;
+      }
+      details.advanced > summary {
+        cursor: pointer;
+        font-size: 13px;
+        font-weight: 600;
+        color: #374151;
+        user-select: none;
+      }
+      details.advanced[open] > summary { margin-bottom: 10px; }
+    </style>
+  </head>
+  <body>
+    <h1>Highlight Ask</h1>
+    <p class="hint">
+      在 PDF 里划选文字 → 点「解释这段」→ 直接问 AI。<br />
+      API Key 只保存在本机 Zotero 配置中，请求由你的电脑直连所填的服务商。
+    </p>
+
+    <fieldset>
+      <legend>模型服务</legend>
+
+      <div class="field">
+        <label for="provider">服务商</label>
+        <select id="provider"></select>
+        <div class="desc" id="provider-desc">
+          选择后会填入该服务商的默认地址与模型，下面每一项都可以手动改。
+        </div>
+      </div>
+
+      <div class="field">
+        <label for="apiKey">API Key</label>
+        <input id="apiKey" type="password" placeholder="sk-..." autocomplete="off" />
+        <div class="desc" id="key-desc"></div>
+      </div>
+
+      <div class="field">
+        <label for="baseUrl">API 地址</label>
+        <input id="baseUrl" type="text" placeholder="https://api.deepseek.com" />
+        <div class="desc">
+          兼容 OpenAI 格式的地址均可。填到域名或 /v1 即可，会自动补 <code>/chat/completions</code>。
+        </div>
+      </div>
+
+      <div class="field">
+        <label for="model">模型</label>
+        <div style="display: flex; gap: 8px; align-items: center">
+          <input id="model" type="text" list="model-list" />
+          <button id="btn-models" class="tiny" type="button">获取模型列表</button>
+        </div>
+        <datalist id="model-list"></datalist>
+        <div class="desc" id="model-desc"></div>
+      </div>
+    </fieldset>
+
+    <fieldset>
+      <legend>回答行为</legend>
+
+      <div class="field">
+        <div class="check">
+          <input id="showReasoning" type="checkbox" />
+          <label for="showReasoning" style="font-weight: 400; margin: 0">
+            在回答上方折叠显示「推理过程」
+          </label>
+        </div>
+        <div class="desc">
+          思考型模型会先输出一段推理再给结论，看不懂公式时这段往往比结论更有用。
+        </div>
+      </div>
+
+      <div class="field">
+        <label for="temperature">温度</label>
+        <input id="temperature" type="text" placeholder="留空则不发这个参数" style="max-width: 200px" />
+        <div class="desc">
+          0~2，越低越稳定。留空则不发送该参数（思考型模型会忽略它）。
+        </div>
+      </div>
+    </fieldset>
+
+    <details class="advanced">
+      <summary>高级：请求参数（JSON）</summary>
+      <div class="field">
+        <label for="thinkingParams">附加到请求体的字段</label>
+        <textarea id="thinkingParams" rows="4" spellcheck="false"></textarea>
+        <div class="desc">
+          直接合并进请求体，用来适配各家的思考/推理开关。留空则不附加。<br />
+          DeepSeek 用 <code>{"reasoning_effort":"high"}</code>（可选 low / high / max）。<br />
+          若服务商报「不支持的参数」，插件会自动去掉这些字段重试一次。
+        </div>
+      </div>
+    </details>
+
+    <div class="actions">
+      <button id="btn-test" type="button">测试连接</button>
+      <span id="status" class="status"></span>
+      <button id="btn-save" class="primary" type="button">保存</button>
+    </div>
+  </body>
+</html>
