@@ -26,7 +26,11 @@ import {
   canAbort,
   makeAbortController,
 } from "../src/modules/deepseek";
-import { renderMarkdown } from "../src/modules/markdown";
+import {
+  renderMarkdown,
+  looksLikeFencedMath,
+  stripMathDelimiters,
+} from "../src/modules/markdown";
 import { HIGHLIGHT_ASK_PROVIDERS } from "../src/data/providers.data";
 import { validateSettings, getProvider } from "../src/modules/providers";
 import { matchesItem } from "../src/modules/sidebar";
@@ -517,6 +521,111 @@ test("the generated catalogue preserves model ids and vision flags", () => {
 
 /* ---------------------------------------------------------------- */
 
+console.log("\nlooksLikeFencedMath");
+// Models routinely wrap formulas in a code fence instead of using $...$.
+// A false positive turns genuine code into garbled maths, so the heuristic
+// must be conservative.
+test("a latex-tagged fence is maths", () => {
+  assert.equal(looksLikeFencedMath("latex", "E = mc^2"), true);
+  assert.equal(looksLikeFencedMath("tex", "x"), true);
+  assert.equal(looksLikeFencedMath("math", "x"), true);
+  assert.equal(looksLikeFencedMath("katex", "x"), true);
+});
+
+test("a fence containing already-delimited maths is maths", () => {
+  assert.equal(looksLikeFencedMath("", "$$E = mc^2$$"), true);
+  assert.equal(looksLikeFencedMath("", "\\[x\\]"), true);
+});
+
+test("an untagged fence with obvious LaTeX and no code is maths", () => {
+  assert.equal(
+    looksLikeFencedMath("", "\\tilde L = L + \\frac{\\alpha}{4}"),
+    true,
+  );
+});
+
+test("a real language tag is never treated as maths", () => {
+  // The decisive guard: `python` fence stays code even if it mentions \frac.
+  assert.equal(looksLikeFencedMath("python", "x = \\frac{1}{2}"), false);
+  assert.equal(looksLikeFencedMath("javascript", "const a = 1"), false);
+  assert.equal(looksLikeFencedMath("json", '{"a": 1}'), false);
+});
+
+test("code-shaped content is not maths even without a tag", () => {
+  assert.equal(looksLikeFencedMath("", "function f() { return 1; }"), false);
+  assert.equal(looksLikeFencedMath("", "const x = 1;"), false);
+  assert.equal(looksLikeFencedMath("", "def f():\n    return 1"), false);
+});
+
+test("plain prose in a fence is not maths", () => {
+  assert.equal(looksLikeFencedMath("", "hello world"), false);
+  assert.equal(looksLikeFencedMath("", "步骤一：准备数据"), false);
+});
+
+test("empty content is not maths", () => {
+  assert.equal(looksLikeFencedMath("", ""), false);
+  assert.equal(looksLikeFencedMath("latex", ""), false);
+});
+
+console.log("\nstripMathDelimiters");
+test("strips $$ and $ wrappers", () => {
+  assert.equal(stripMathDelimiters("$$x$$"), "x");
+  assert.equal(stripMathDelimiters("$x$"), "x");
+});
+
+test("strips backslash-bracket wrappers", () => {
+  assert.equal(stripMathDelimiters("\\[x\\]"), "x");
+  assert.equal(stripMathDelimiters("\\(x\\)"), "x");
+});
+
+test("leaves undelimited content alone", () => {
+  assert.equal(stripMathDelimiters("x + y"), "x + y");
+});
+
+test("does not eat a lone dollar in text", () => {
+  assert.equal(stripMathDelimiters("price is $5"), "price is $5");
+});
+
+console.log("\nfenced maths in renderMarkdown");
+test("a latex fence renders as maths, not as a code block", () => {
+  const root = renderMarkdown("```latex\nE = mc^2\n```", doc, {
+    renderMath: (el: any, latex: string) => {
+      el.textContent = `MATH(${latex})`;
+      return true;
+    },
+  });
+  const flat = root.serialize();
+  assert.ok(flat.includes("MATH(E = mc^2)"), flat);
+  assert.ok(!flat.includes("<pre>"), `should not be a code block: ${flat}`);
+});
+
+test("a python fence still renders as a code block", () => {
+  const root = renderMarkdown("```python\nx = 1\n```", doc, {
+    renderMath: (el: any) => {
+      el.textContent = "MATH";
+      return true;
+    },
+  });
+  const flat = root.serialize();
+  assert.ok(flat.includes("<pre>"), flat);
+  assert.ok(!flat.includes("MATH"), flat);
+});
+
+test("$$-delimited maths still renders as maths", () => {
+  const root = renderMarkdown("$$a^2$$", doc, {
+    renderMath: (el: any, latex: string) => {
+      el.textContent = `MATH(${latex})`;
+      return true;
+    },
+  });
+  assert.ok(root.serialize().includes("MATH(a^2)"), root.serialize());
+});
+
+test("falls back to the source when no renderer is supplied", () => {
+  const root = renderMarkdown("$$a^2$$", doc);
+  assert.ok(root.serialize().includes("a^2"), root.serialize());
+});
+
 console.log("\nvalidateSettings");
 const baseDraft = () => ({
   providerKey: "deepseek",
@@ -788,6 +897,19 @@ test("forbids inventing content for damaged PDF text", () => {
 test("the scenario layer also forbids glossing and enforces the task", () => {
   assert.match(DEFAULT_SCENARIO_PROMPT, /括号夹注/);
   assert.match(DEFAULT_SCENARIO_PROMPT, /严格按「问题」里提出的要求作答/);
+});
+
+test("the scenario layer pins down the maths delimiters", () => {
+  // Models otherwise drift to code fences or \( \) forms, which then do not
+  // render. The renderer tolerates fences, but the prompt should not rely on it.
+  assert.match(DEFAULT_SCENARIO_PROMPT, /行内用 \$\.\.\.\$/, "inline rule missing");
+  assert.match(DEFAULT_SCENARIO_PROMPT, /\$\$\.\.\.\$\$/, "display rule missing");
+  assert.match(DEFAULT_SCENARIO_PROMPT, /不要.*放进代码块/, "fence ban missing");
+  assert.match(DEFAULT_SCENARIO_PROMPT, /只认 \$ 符号/, "single-delimiter rule missing");
+});
+
+test("the translate task also forbids code fences around maths", () => {
+  assert.match(DEFAULT_TRANSLATE_TASK, /不要用代码块包起来/);
 });
 
 console.log("\ntrimFullText");

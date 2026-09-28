@@ -24,6 +24,91 @@ export interface RenderOptions {
 
 const MATH_PLACEHOLDER_PREFIX = "\u0000MATH";
 
+/**
+ * Is a fenced block actually a formula?
+ *
+ * Models routinely wrap maths in a `latex` / `tex` code fence instead of using
+ * `$...$`, and showing the source there looks like a bug to the reader. The
+ * prompt asks for `$...$`, but rendering must not depend on the model
+ * cooperating.
+ *
+ * Deliberately conservative: a false positive turns a genuine code sample into
+ * garbled maths, which is worse than leaving a formula unrendered. Empty
+ * content is never maths, and a real language tag always wins.
+ */
+export function looksLikeFencedMath(lang: string, code: string): boolean {
+  const body = (code || "").trim();
+  // Nothing to render — checked first so a bare `latex` fence stays inert.
+  if (!body) {
+    return false;
+  }
+
+  const marker = (lang || "").trim().toLowerCase();
+  if (["latex", "tex", "math", "katex", "amsmath"].includes(marker)) {
+    return true;
+  }
+
+  // Already delimited as maths, just inside a fence.
+  if (/^\$\$[\s\S]*\$\$$/.test(body)) {
+    return true;
+  }
+  if (/^\\[[\s\S]*\\]$/.test(body) || /^\\\([\s\S]*\\\)$/.test(body)) {
+    return true;
+  }
+
+  // An untagged fence is only maths when it is unmistakably LaTeX **and** shows
+  // no signs of being code.
+  if (marker) {
+    return false; // e.g. `python`
+  }
+  const looksTex =
+    /\\(frac|dfrac|tfrac|sum|prod|int|sqrt|tilde|hat|bar|vec|nabla|partial|alpha|beta|gamma|theta|lambda|mu|sigma|omega|mathbb|mathcal|text|left|right|cdot|times|leq|geq|neq|approx|infty)\b/.test(
+      body,
+    );
+  const looksCody =
+    /=>|\b(function|return|const|let|var|def|class|import|print)\b|[;{]\s*$/.test(body);
+  return looksTex && !looksCody;
+}
+
+/**
+ * Strip maths delimiters from a complete formula.
+ *
+ * Deny-by-default: a delimiter is only removed when the content genuinely opens
+ * **and** closes with a matching pair. A looser rule would eat the first `$` of
+ * `$x$ y $z$` and silently change the formula.
+ */
+export function stripMathDelimiters(text: string): string {
+  let body = (text || "").trim();
+  if (!body) {
+    return "";
+  }
+
+  const pairs: Array<[string, string]> = [
+    ["$$", "$$"],
+    ["\\[", "\\]"],
+    ["\\(", "\\)"],
+    ["$", "$"],
+  ];
+  for (const [open, close] of pairs) {
+    if (
+      body.length > open.length + close.length &&
+      body.startsWith(open) &&
+      body.endsWith(close)
+    ) {
+      // For the single-$ case, require that the surrounding dollars really are
+      // a pair: exactly two of them in total.
+      if (open === "$" && (body.match(/\$/g) || []).length !== 2) {
+        continue;
+      }
+      body = body.slice(open.length, body.length - close.length).trim();
+      break;
+    }
+  }
+
+  // A display formula may end with the LaTeX line break `\\`.
+  return body.endsWith("\\\\") ? body.slice(0, -2).trim() : body;
+}
+
 export function renderMarkdown(
   markdown: string,
   doc: Document,
@@ -68,8 +153,16 @@ export function renderMarkdown(
         body.push(lines[i]);
         i++;
       }
+      const joined = body.join("\n");
+      if (looksLikeFencedMath(lang, joined)) {
+        // A formula the model wrapped in a fence: render it as maths rather
+        // than showing its source in a code box.
+        mathStore.push(stripMathDelimiters(joined));
+        blocks.push({ kind: "math", index: mathStore.length - 1 });
+        continue;
+      }
       // Unterminated fence while streaming: keep what we have.
-      codeStore.push({ lang, code: body.join("\n") });
+      codeStore.push({ lang, code: joined });
       blocks.push({ kind: "code", index: codeStore.length - 1 });
       continue;
     }
