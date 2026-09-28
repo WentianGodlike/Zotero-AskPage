@@ -30,6 +30,10 @@ pref("sendAnnotations", true);
 // the article). Extended derivations and full parameter tables usually live
 // there, which is where questions about a paper's maths tend to land.
 pref("sendSI", true);
+// Show a "截图预览" button in the panel: crops the current selection out of the
+// PDF canvas and saves it to <data dir>/highlight-ask/debug/ so it can be
+// inspected. Off by default; it is a development aid.
+pref("debugScreenshot", true);
 // Character budget per SI document.
 pref("siMaxChars", 200000);
 // Default state of the per-panel "全文" toggle.

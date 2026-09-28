@@ -35,6 +35,14 @@ import { HIGHLIGHT_ASK_PROVIDERS } from "../src/data/providers.data";
 import { validateSettings, getProvider } from "../src/modules/providers";
 import { matchesItem } from "../src/modules/sidebar";
 import {
+  scaleRectToCanvas,
+  expandForFormula,
+  clampRect,
+  isUsableRect,
+  unionRects,
+  dataUrlBytes,
+} from "../src/modules/screenshot";
+import {
   htmlToText,
   formatAnnotations,
   looksLikeSupportingFilename,
@@ -1098,6 +1106,98 @@ test("a throwing Zotero.Items.get degrades to no match", () => {
   } finally {
     (globalThis as any).Zotero.Items.get = original;
   }
+});
+
+console.log("\nscreenshot geometry");
+// This maths is where a screenshot silently captures the wrong region, which
+// then looks like a model failure rather than a bug.
+test("scales a text-layer rect into canvas pixels", () => {
+  // Page laid out at 600x800 CSS px, drawn into a canvas at 1200x1600 (2x DPR).
+  const out = scaleRectToCanvas(
+    { left: 110, top: 210, width: 100, height: 20 },
+    { left: 100, top: 200, width: 600, height: 800 },
+    1200,
+    1600,
+  );
+  assert.deepEqual(out, { left: 20, top: 20, width: 200, height: 40 });
+});
+
+test("handles zoom as well as device pixel ratio", () => {
+  // Same page at 1.5x zoom: the layer box grows, so the scale shrinks.
+  const out = scaleRectToCanvas(
+    { left: 150, top: 300, width: 150, height: 30 },
+    { left: 0, top: 0, width: 900, height: 1200 },
+    1200,
+    1600,
+  );
+  assert.deepEqual(out, { left: 200, top: 400, width: 200, height: 40 });
+});
+
+test("degenerate layer box yields an empty rect instead of Infinity", () => {
+  const out = scaleRectToCanvas(
+    { left: 1, top: 1, width: 1, height: 1 },
+    { left: 0, top: 0, width: 0, height: 0 },
+    100,
+    100,
+  );
+  assert.deepEqual(out, { left: 0, top: 0, width: 0, height: 0 });
+});
+
+test("grows a tight selection to the full line height", () => {
+  // A selection 6px tall in a 20px line box should gain 7px on each side.
+  const out = expandForFormula({ left: 10, top: 10, width: 50, height: 6 }, 20, 1, 2);
+  assert.equal(out.top, 10 - 7 - 2);
+  assert.equal(out.height, 6 + 14 + 4);
+});
+
+test("never shrinks a selection taller than its line height", () => {
+  const out = expandForFormula({ left: 0, top: 0, width: 10, height: 40 }, 20, 1, 0);
+  assert.equal(out.height, 40);
+  assert.equal(out.top, 0);
+});
+
+test("clamps to the canvas and rounds to whole pixels", () => {
+  const out = clampRect(
+    { left: -5.4, top: -2.2, width: 30.8, height: 12.6 },
+    100,
+    100,
+  );
+  assert.equal(out.left, 0);
+  assert.equal(out.top, 0);
+  assert.ok(Number.isInteger(out.width) && Number.isInteger(out.height));
+  assert.ok(out.left + out.width <= 100);
+  assert.ok(out.top + out.height <= 100);
+});
+
+test("clamping an off-canvas rect produces nothing usable", () => {
+  const out = clampRect({ left: 500, top: 500, width: 50, height: 50 }, 100, 100);
+  assert.equal(isUsableRect(out), false);
+});
+
+test("rejects rects too small to be worth sending", () => {
+  assert.equal(isUsableRect({ left: 0, top: 0, width: 3, height: 30 }), false);
+  assert.equal(isUsableRect({ left: 0, top: 0, width: 30, height: 30 }), true);
+});
+
+test("unions the lines of a wrapped formula", () => {
+  const out = unionRects([
+    { left: 10, top: 10, width: 100, height: 20 },
+    { left: 20, top: 40, width: 60, height: 20 },
+  ])!;
+  assert.equal(out.left, 10);
+  assert.equal(out.top, 10);
+  assert.equal(out.width, 100);
+  assert.equal(out.height, 50);
+});
+
+test("union of nothing is null", () => {
+  assert.equal(unionRects([]), null);
+});
+
+test("estimates decoded PNG size from a data URL", () => {
+  // 8 base64 chars = 6 bytes.
+  assert.equal(dataUrlBytes("data:image/png;base64,AAAAAAAA"), 6);
+  assert.equal(dataUrlBytes("not-a-data-url"), 0);
 });
 
 console.log("\nSI detection");
