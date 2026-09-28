@@ -151,7 +151,107 @@ const OPERATORS: Record<string, string> = {
   cdots: "\u22ef", dots: "\u2026", angle: "\u2220", perp: "\u22a5",
   parallel: "\u2225", sim: "\u223c", simeq: "\u2243", ll: "\u226a",
   gg: "\u226b", prime: "\u2032", circ: "\u2218",
+  // Norm and delimiter characters. `\|` and `\Vert` are how a norm or a
+  // double bar is written; without these the backslash swallowed the bar and
+  // `\|\nabla L\|` came out looking like a letter.
+  "|": "\u2016", Vert: "\u2016", vert: "|", lVert: "\u2016",
+  rVert: "\u2016", lvert: "|", rvert: "|",
+  langle: "\u27e8", rangle: "\u27e9", lceil: "\u2308", rceil: "\u2309",
+  lfloor: "\u230a", rfloor: "\u230b", backslash: "\\",
 };
+
+/**
+ * Accents.
+ *
+ * `char` is a combining mark placed after the base character; `body` is used
+ * with KaTeX's own `.accent` / `.accent-body` classes, which is how KaTeX
+ * positions marks over wide bases. Both are emitted: the class-based version
+ * handles alignment, and the combining mark keeps the text copyable and
+ * readable if a font lacks the positioning rule.
+ */
+const ACCENTS: Record<string, { char: string; wide?: boolean }> = {
+  tilde: { char: "\u0303", wide: true },
+  widetilde: { char: "\u0303", wide: true },
+  hat: { char: "\u0302" },
+  widehat: { char: "\u0302", wide: true },
+  bar: { char: "\u0304" },
+  vec: { char: "\u20d7" },
+  dot: { char: "\u0307" },
+  ddot: { char: "\u0308" },
+  acute: { char: "\u0301" },
+  grave: { char: "\u0300" },
+  check: { char: "\u030c" },
+  breve: { char: "\u0306" },
+};
+
+/**
+ * Mathematical alphanumeric alphabets.
+ *
+ * The Unicode "Mathematical Alphanumeric Symbols" block is NOT a contiguous
+ * range per alphabet: blackboard bold letters such as ℂ, ℍ, ℕ, ℙ, ℚ, ℝ, ℤ live
+ * in the Letterlike Symbols block, and the script/fraktur uppercase sets have
+ * holes. Computing an offset from a base therefore produces wrong glyphs —
+ * `\mathbb{R}` came out as 𝕉. Alphabets with holes are listed explicitly.
+ */
+const BB_UPPER = "𝔸𝔹ℂ𝔻𝔼𝔽𝔾ℍ𝕀𝕁𝕂𝕃𝕄ℕ𝕆ℙℚℝ𝕊𝕋𝕌𝕍𝕎𝕏𝕐ℤ";
+const CAL_UPPER = "𝒜ℬ𝒞𝒟ℰℱ𝒢ℋℐ𝒥𝒦ℒℳ𝒩𝒪𝒫𝒬ℛ𝒮𝒯𝒰𝒱𝒲𝒳𝒴𝒵";
+const FRAK_UPPER = "𝔄𝔅ℭ𝔇𝔈𝔉𝔊ℌℑ𝔍𝔎𝔏𝔐𝔑𝔒𝔓𝔔ℜ𝔖𝔗𝔘𝔙𝔚𝔛𝔜ℨ";
+
+/** Command names handled by `toAlphabet`. */
+const ALPHABET_COMMANDS = new Set([
+  "mathbb", "mathcal", "mathfrak", "mathbf", "mathit", "mathsf", "mathtt",
+]);
+
+/**
+ * Split into code points up front.
+ *
+ * Blackboard-bold and script letters live above U+FFFF, so a string index
+ * returns half a surrogate pair — `upperMap[17]` yielded "\ud835" rather than
+ * a character. `Array.from` iterates by code point instead.
+ */
+const BB_UPPER_CP = Array.from(BB_UPPER);
+const CAL_UPPER_CP = Array.from(CAL_UPPER);
+const FRAK_UPPER_CP = Array.from(FRAK_UPPER);
+
+function mapAscii(text: string, upperTable: string[], lowerBase: number): string {
+  let out = "";
+  for (const ch of text) {
+    const code = ch.charCodeAt(0);
+    if (code >= 65 && code <= 90) {
+      const idx = code - 65;
+      // Prefer the explicit table; fall back to a computed code point.
+      out += upperTable.length
+        ? upperTable[idx]
+        : String.fromCodePoint(lowerBase - 32 + idx);
+    } else if (code >= 97 && code <= 122) {
+      out += String.fromCodePoint(lowerBase + (code - 97));
+    } else {
+      out += ch;
+    }
+  }
+  return out;
+}
+
+function toAlphabet(text: string, kind: string): string {
+  switch (kind) {
+    case "mathbb":
+      return mapAscii(text, BB_UPPER_CP, 0x1d552);
+    case "mathcal":
+      return mapAscii(text, CAL_UPPER_CP, 0x1d4b6);
+    case "mathfrak":
+      return mapAscii(text, FRAK_UPPER_CP, 0x1d51e);
+    case "mathbf":
+      return mapAscii(text, [], 0x1d41a);
+    case "mathit":
+      return mapAscii(text, [], 0x1d44e);
+    case "mathsf":
+      return mapAscii(text, [], 0x1d5ba);
+    case "mathtt":
+      return mapAscii(text, [], 0x1d68a);
+    default:
+      return text;
+  }
+}
 
 const BIG_OPERATORS = new Set([
   "sum", "prod", "int", "iint", "oint", "bigcup", "bigcap", "lim", "max", "min",
@@ -394,6 +494,34 @@ function parseLatex(src: string): MathNode {
         nodes.push(span("msqrt", [text("\u221a"), span("msqrt-inner", [parseLatex(arg.text)])]));
         continue;
       }
+      if (ACCENTS[name]) {
+        flush();
+        const arg = takeArg(src, i);
+        i = arg.next;
+        nodes.push(accentNode(name, arg.text));
+        continue;
+      }
+      if (ALPHABET_COMMANDS.has(name)) {
+        flush();
+        const arg = takeArg(src, i);
+        i = arg.next;
+        nodes.push(text(toAlphabet(arg.text, name)));
+        continue;
+      }
+      if (name === "overline" || name === "underline") {
+        flush();
+        const arg = takeArg(src, i);
+        i = arg.next;
+        nodes.push(
+          styled(
+            name === "overline"
+              ? "border-top:1px solid currentColor;padding-top:.08em"
+              : "border-bottom:1px solid currentColor;padding-bottom:.08em",
+            [parseLatex(arg.text)],
+          ),
+        );
+        continue;
+      }
       if (name === "text" || name === "mathrm" || name === "operatorname") {
         flush();
         const arg = takeArg(src, i);
@@ -464,6 +592,22 @@ function parseLatex(src: string): MathNode {
 
   flush();
   return nodes.length === 1 ? nodes[0] : { tag: "span", children: nodes };
+}
+
+/**
+ * Build an accented expression.
+ *
+ * Emits KaTeX's `.accent` / `.accent-body` structure so the mark is positioned
+ * by the stylesheet, and includes the combining character so the text stays
+ * copyable and degrades sensibly.
+ */
+function accentNode(name: string, arg: string): MathNode {
+  const spec = ACCENTS[name];
+  const base = parseLatex(arg);
+  const mark = spec.char;
+  return span("accent", [
+    span("accent-body", [base, text(mark)]),
+  ]);
 }
 
 /** A sub/superscript: Unicode when every character has a form, else CSS. */

@@ -963,7 +963,12 @@ const CSS = `
   padding: 0 .18em;
   margin-left: .08em;
 }
+/* Accents: the combining mark rides on the base character; KaTeX's own
+   .accent/.accent-body rules from Zotero's stylesheet do the fine positioning. */
+.ha-chat .accent { position: relative; display: inline-block; }
+.ha-chat .accent-body { display: inline-block; }
 .ha-chat .mop { font-style: normal; padding: 0 .12em; }
+
 .ha-chat .mtext { font-style: normal; }
 /* Inline math keeps a light chip so it stands out from prose. */
 .ha-chat .ha-math-inline.ha-math-rendered {

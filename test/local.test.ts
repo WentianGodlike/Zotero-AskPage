@@ -567,6 +567,105 @@ test("empty content is not maths", () => {
   assert.equal(looksLikeFencedMath("latex", ""), false);
 });
 
+console.log("\nmathTree: accents, alphabets, norms");
+// These pin down Unicode details that are easy to get wrong:
+//   - the Mathematical Alphanumeric block has HOLES (ℂ ℕ ℝ ℤ are elsewhere in
+//     Unicode, and the script capitals leak too), so offsets do not work
+//   - astral letters need code-point iteration, not string indexing
+//   - `\|` is one command, not a backslash plus a bar
+test("renders accented symbols as base + combining mark", () => {
+  const cases: Array<[string, string]> = [
+    ["\\tilde{L}", "L\u0303"],
+    ["\\hat{x}", "x\u0302"],
+    ["\\bar{x}", "x\u0304"],
+    ["\\vec{v}", "v\u20d7"],
+    ["\\dot{x}", "x\u0307"],
+    ["\\ddot{x}", "x\u0308"],
+    ["\\widehat{AB}", "AB\u0302"],
+  ];
+  for (const [tex, want] of cases) {
+    assert.equal(flatten(mathTree(tex)), want, `${tex} rendered wrong`);
+  }
+});
+
+test("accents use KaTeX's accent classes", () => {
+  assert.ok(classes(mathTree("\\tilde{L}")).includes("accent"));
+  assert.ok(classes(mathTree("\\tilde{L}")).includes("accent-body"));
+});
+
+test("over- and underline use rules rather than combining marks", () => {
+  const styles: string[] = [];
+  const walk = (n: MathNode) => {
+    if (typeof n !== "string") {
+      if (n.style) styles.push(n.style);
+      for (const c of n.children ?? []) walk(c);
+    }
+  };
+  walk(mathTree("\\overline{AB}"));
+  walk(mathTree("\\underline{AB}"));
+  assert.ok(styles.some((st) => st.includes("border-top")), styles.join("|"));
+  assert.ok(styles.some((st) => st.includes("border-bottom")), styles.join("|"));
+});
+
+test("blackboard bold letters with Unicode holes come out right", () => {
+  // 𝔼 is a plain offset, but ℂ ℕ ℚ ℝ ℤ live far away in Letterlike Symbols.
+  const cases: Array<[string, string]> = [
+    ["\\mathbb{R}", "\u211d"],
+    ["\\mathbb{N}", "\u2115"],
+    ["\\mathbb{C}", "\u2102"],
+    ["\\mathbb{Q}", "\u211a"],
+    ["\\mathbb{Z}", "\u2124"],
+    ["\\mathbb{P}", "\u2119"],
+    ["\\mathbb{H}", "\u210d"],
+    ["\\mathbb{E}", "𝔼"],
+  ];
+  for (const [tex, want] of cases) {
+    assert.equal(flatten(mathTree(tex)), want, `${tex} rendered wrong`);
+  }
+});
+
+test("script capitals with holes come out right", () => {
+  assert.equal(flatten(mathTree("\\mathcal{L}")), "\u2112"); // ℒ
+  assert.equal(flatten(mathTree("\\mathcal{A}")), "\ud835\udc9c"); // 𝒜
+  assert.equal(flatten(mathTree("\\mathcal{H}")), "\u210b"); // ℋ
+});
+
+test("astral letters survive (no half surrogate pairs)", () => {
+  // String indexing used to yield "\ud835" here.
+  const out = flatten(mathTree("\\mathbb{ABCDEFGHIJKLMNOPQRSTUVWXYZ}"));
+  assert.equal(Array.from(out).length, 26, `expected 26 code points, got ${Array.from(out).length}`);
+  assert.ok(!out.includes("\ud835\ud835"), "produced broken surrogate pairs");
+  for (const ch of Array.from(out)) {
+    assert.ok(ch.codePointAt(0)! >= 0x1d538 || ch.codePointAt(0)! >= 0x2100);
+  }
+});
+
+test("lowercase alphabets map to the right code points", () => {
+  assert.equal(flatten(mathTree("\\mathbb{a}")), "\ud835\udd52"); // 𝕒
+  assert.equal(flatten(mathTree("\\mathfrak{g}")), "\ud835\udd24"); // 𝔤
+});
+
+test("a norm written as a double bar is not a stray backslash", () => {
+  // `\|` is one command. Treating it as "backslash then bar" broke formulas.
+  assert.equal(flatten(mathTree("\\|x\\|")), "\u2016x\u2016");
+  const full = flatten(mathTree("\\frac{\\alpha}{4}\\|\\nabla L\\|^2"));
+  assert.ok(full.includes("\u2016"), `norm bars missing: ${full}`);
+  assert.ok(full.includes("\u2207"), `nabla missing: ${full}`);
+  assert.ok(!full.includes("\\"), `a stray backslash survived: ${full}`);
+});
+
+test("\nabla and other operators survive next to norms", () => {
+  assert.equal(flatten(mathTree("\\nabla L")), "\u2207 L");
+});
+
+test("langle/rangle and ceil/floor render", () => {
+  // Note the space after \\langle: it is preserved, which is correct —
+  // TeX also keeps it. Using "\\langlex" would instead parse as one
+  // command name.
+  assert.equal(flatten(mathTree("\\langle x\\rangle")), "⟨ x⟩");
+  assert.equal(flatten(mathTree("\\lceil x\\rceil")), "⌈ x⌉");
+});
+
 console.log("\nstripMathDelimiters");
 test("strips $$ and $ wrappers", () => {
   assert.equal(stripMathDelimiters("$$x$$"), "x");
