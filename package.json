@@ -1,7 +1,7 @@
 {
   "name": "zotero-highlight-ask",
   "type": "module",
-  "version": "0.12.4",
+  "version": "0.12.5",
   "description": "Highlight text in Zotero PDF reader and ask DeepSeek to explain it.",
   "config": {
     "addonName": "Highlight Ask",
