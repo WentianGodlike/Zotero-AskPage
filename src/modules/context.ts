@@ -24,36 +24,95 @@ import { getPref } from "../utils/prefs";
  * library: ACS `ma3c01377_si_001.pdf`, Wiley `advs10440-sup-0001-suppmat.pdf`,
  * Elsevier `1-s2.0-...-main.pdf` for the article itself.
  */
-const SI_PATTERNS: RegExp[] = [
-  // Separator-delimited "si": `_si_`, `-si-`, `SI_1`, `_SI_v2`.
+/**
+ * Self-declarations: the document says what it is.
+ *
+ * This is the authoritative signal and it is what publishers actually print on
+ * the first page of supporting material:
+ *
+ *   "Supporting Information for:"
+ *   "Supporting Information for Adv. Sci., DOI 10.1002/advs.202411385"
+ *   "Supplementary Material"
+ *
+ * It works for Word documents and HTML too, so it does not care about the file
+ * format the way a filename rule has to.
+ */
+const SI_DECLARATIONS: RegExp[] = [
+  // The forms publishers actually print, taken from real files:
+  //   "Supporting Information for:"
+  //   "Supporting Information for Adv. Sci., DOI 10.1002/advs.202411385"
+  //   "Supporting Information"
   //
-  // A bare " SI.pdf" is deliberately NOT matched. In a real library an article
-  // title ended in "... Shape Memory Polymers Si.pdf", which is indistinguishable
-  // from a file literally named "SI.pdf" at the filename level. Precision wins:
-  // sending the article as Supporting Information is worse than missing one.
-  /[-_]si[-_ ]?\d/i, // ACS: ma3c01377_si_001
-  /[-_]si(?![a-z])/i, // paper_SI, paper-SI_v2
-  /^si[-_ ]?\d/i, // SI_1.pdf
-  /supp(mat|lement|lementary|lemental|[-_ ]?info|[-_ ]?data)/i,
-  /(^|[^a-z])sup[-_ ]?0*\d/i, // sup-0001, supp0
-  /supporting[\s_-]*information/i,
-  /electronic[\s_-]*supplementary/i,
-  /(^|[^a-z])es[im](?![a-z])/i, // RSC ESI / ESM
-  /appendi(x|ces)/i,
-  /[-_]mmc\d/i, // Elsevier
+  // "for" is what separates a declaration from a citation: a paper's abstract
+  // routinely says "...are given in the Supporting Information", and a loose
+  // match sent the article itself as SI.
+  /^\s*supporting\s+information\s*(for\b|$|[:.\u2014-])/im,
+  /^\s*supplementary\s+(material|information|data|methods|note|notes)\b/im,
+  /^\s*electronic\s+supplementary\s+(material|information)\b/im,
+  // A heading, on its own line.
+  /^\s*\(?\s*(si|es[im])\s*\)?\s*$/im,
+  /this\s+(document|file|pdf)\s+(contains|is)\s+(the\s+)?supplement/i,
 ];
 
-/** Does this filename look like Supporting Information? */
-export function looksLikeSupportingInfo(name: string): boolean {
-  // Keep the extension: "SI.pdf" is a legitimate name, and dropping ".pdf"
-  // would remove the only thing marking the end of the token.
+/**
+ * Sanity guard for the front-matter scan.
+ *
+ * A regular article can legitimately *mention* "Supporting Information" in its
+ * abstract or a footnote. Restricting the scan to the first kilobyte and
+ * requiring either the declaration near the very start or an explicit
+ * supplementary heading keeps that from firing.
+ */
+export function declaresItselfSupportingInfo(frontMatter: string): boolean {
+  const text = String(frontMatter || "").slice(0, 2000);
+  if (!text.trim()) {
+    return false;
+  }
+  return SI_DECLARATIONS.some((re) => re.test(text));
+}
+
+/**
+ * Filename fallback.
+ *
+ * Used only when the document's own text is unavailable — an unindexed scan, a
+ * format Zotero cannot extract. Kept narrow on purpose: it exists to catch the
+ * obvious publisher suffixes, not to guess.
+ */
+const SI_FILENAME_PATTERNS: RegExp[] = [
+  /[-_ ]si[-_ ]?\d/i, // ACS: ma3c01377_si_001.pdf
+  /supp(mat|lement|lementary|lemental)/i, // Wiley: -suppmat
+  /[-_]mmc\d/i, // Elsevier: -mmc1
+  /[-_ ]es[im](?![a-z])/i, // RSC: ESI / ESM
+];
+
+/** Does the filename unmistakably mark this as supporting material? */
+export function looksLikeSupportingFilename(name: string): boolean {
+  // Keep the extension: `SI.pdf` relies on it to mark the end of the token.
   const base = String(name || "")
     .replace(/^.*[\\/]/, "")
     .toLowerCase();
   if (!base || base === ".pdf") {
     return false;
   }
-  return SI_PATTERNS.some((re) => re.test(base));
+  return SI_FILENAME_PATTERNS.some((re) => re.test(base));
+}
+
+/**
+ * Decide whether an attachment is Supporting Information.
+ *
+ * Content first, filename second — documented in that order because the
+ * filename heuristic is exactly the kind of guess this project keeps getting
+ * burned by. `frontMatter` is the first part of the document's extracted text.
+ */
+export function isSupportingInfo(
+  attachment: { name: string; frontMatter?: string },
+): { yes: boolean; why: "declared" | "filename" | "no" } {
+  if (attachment.frontMatter && declaresItselfSupportingInfo(attachment.frontMatter)) {
+    return { yes: true, why: "declared" };
+  }
+  if (looksLikeSupportingFilename(attachment.name)) {
+    return { yes: true, why: "filename" };
+  }
+  return { yes: false, why: "no" };
 }
 
 export interface SupportingInfoDoc {
@@ -62,6 +121,8 @@ export interface SupportingInfoDoc {
   text: string;
   chars: number;
   truncated: boolean;
+  /** How it was identified, for the debug log and the panel status line. */
+  why: "declared" | "filename";
 }
 
 export interface Annotation {
@@ -305,20 +366,48 @@ export async function getSupportingInfo(
   const out: SupportingInfoDoc[] = [];
   try {
     const budget = Number(getPref("siMaxChars")) || 200000;
-    for (const attachment of await pdfAttachments(itemID)) {
+    const attachments = await pdfAttachments(itemID);
+    // Only meaningful when there is more than one document: a lone PDF is the
+    // article, whatever its name says.
+    const multiple = attachments.length > 1;
+
+    for (const attachment of attachments) {
       const name = String(
         (attachment as any).attachmentFilename ||
           (attachment as any).getField?.("title") ||
           "",
       );
-      if (!looksLikeSupportingInfo(name)) {
-        continue;
-      }
+
+      // Reading the text is also what we need if it *is* SI, so there is no
+      // wasted work either way.
       const indexed = attachment as unknown as { getText?: () => Promise<string> };
-      const raw = (await indexed.getText?.()) || "";
-      if (!raw.trim()) {
+      let raw = "";
+      try {
+        raw = (await indexed.getText?.()) || "";
+      } catch (e) {
+        Zotero.debug(
+          `[Highlight Ask] getText failed for ${attachment.id}: ${
+            (e as Error)?.message || e
+          }`,
+        );
+      }
+
+      const verdict = isSupportingInfo({
+        name,
+        frontMatter: raw.slice(0, 2000),
+      });
+
+      // The filename fallback only applies when there really are sibling
+      // documents; otherwise "supp" in a lone filename means nothing.
+      const byDeclaration = verdict.why === "declared";
+      const byFilename = verdict.why === "filename" && multiple;
+      if ((!byDeclaration && !byFilename) || !raw.trim()) {
         continue;
       }
+
+      Zotero.debug(
+        `[Highlight Ask] SI detected by ${verdict.why}: ${name || attachment.id}`,
+      );
       const { text, truncated } = trimFullText(raw, budget);
       out.push({
         itemID: attachment.id,
@@ -326,6 +415,7 @@ export async function getSupportingInfo(
         text,
         chars: text.length,
         truncated,
+        why: byDeclaration ? "declared" : "filename",
       });
     }
   } catch (e) {

@@ -37,7 +37,9 @@ import { matchesItem } from "../src/modules/sidebar";
 import {
   htmlToText,
   formatAnnotations,
-  looksLikeSupportingInfo,
+  looksLikeSupportingFilename,
+  declaresItselfSupportingInfo,
+  isSupportingInfo,
   bundleSize,
 } from "../src/modules/context";
 import {
@@ -1098,52 +1100,86 @@ test("a throwing Zotero.Items.get degrades to no match", () => {
   }
 });
 
-console.log("\nlooksLikeSupportingInfo");
-// Patterns taken from a real library. Mistaking the article for SI would send
-// the wrong document; mistaking SI for the article loses the derivations.
-test("recognises the publishers' actual SI filenames", () => {
-  for (const name of [
-    "ma3c01377_si_001.pdf", // ACS
-    "advs10440-sup-0001-suppmat.pdf", // Wiley
-    "supporting information.pdf",
-    "paper_SI_v2.pdf",
-    "SI_1.pdf",
-    "paper_ESI.pdf", // RSC
-    "1-s2.0-S0009261420308812-mmc1.pdf", // Elsevier supplementary
-    "appendix.pdf",
+console.log("\nSI detection");
+// The authoritative signal is the document's own front matter — that is what
+// publishers print on the first page of supporting material, and unlike a
+// filename rule it works for Word files and HTML too.
+test("recognises real first pages from a library", () => {
+  // Verbatim openings of the two SI PDFs found in a real library.
+  const acs = "Supporting Information for:\nModeling exchange reactions in covalent adaptable networks\nYaguang Sun1, Kaiwei Wan1,2";
+  const wiley = "Supporting Information\nfor Adv. Sci., DOI 10.1002/advs.202411385\nAI-Guided Inverse Design";
+  assert.equal(isSupportingInfo({ name: "ma3c01377_si_001.pdf", frontMatter: acs }).why, "declared");
+  assert.equal(isSupportingInfo({ name: "advs10440-sup-0001-suppmat.pdf", frontMatter: wiley }).why, "declared");
+});
+
+test("recognises a bare heading, with or without the (SI) brackets", () => {
+  for (const front of [
+    "Supporting Information",
+    "Supplementary Material",
+    "Electronic Supplementary Material",
+    "SI\nFigure S1. NMR spectra",
+    "(SI)",
   ]) {
-    assert.equal(looksLikeSupportingInfo(name), true, `should be SI: ${name}`);
+    assert.equal(
+      isSupportingInfo({ name: "x.pdf", frontMatter: front }).yes,
+      true,
+      `should declare itself: ${JSON.stringify(front)}`,
+    );
   }
 });
 
-test("does not mistake the article for SI", () => {
+test("does not fire on an article that merely mentions SI", () => {
+  // This was a real false positive: a loose /supporting information/i matched
+  // an abstract sentence and sent the article itself as SI.
+  const mention = "A Study of Something\nAbstract: Details are given in the Supporting Information.\nIntroduction";
+  assert.equal(isSupportingInfo({ name: "paper.pdf", frontMatter: mention }).yes, false);
+  const citation = "Results\nSee Supplementary Material for details.";
+  assert.equal(isSupportingInfo({ name: "paper.pdf", frontMatter: citation }).yes, false);
+});
+
+test("does not fire on a journal front page", () => {
+  const front = "Chemical Physics Letters 760 (2020) 137966\nContents lists available at ScienceDirect\nResearch paper";
+  assert.equal(isSupportingInfo({ name: "1-s2.0-...-main.pdf", frontMatter: front }).yes, false);
+});
+
+test("filename is only a fallback, and only when siblings exist", () => {
+  // An unindexed scan has no text to read; the obvious publisher suffixes still
+  // help. A wrong filename alone must not be enough.
+  const v = isSupportingInfo({ name: "ma3c01377_si_001.pdf" });
+  assert.equal(v.why, "filename");
+});
+
+test("the old false positive stays fixed", () => {
+  // Title ends in a standalone "Si"; no content declaration is present.
+  const name = "Shafe 等 - 2024 - Identification and Design of Better Diamine-Hardened Epoxy-Based Thermoset Shape Memory Polymers Si.pdf";
+  assert.equal(looksLikeSupportingFilename(name), false);
+  assert.equal(isSupportingInfo({ name }).yes, false);
+});
+
+test("filename rules stay narrow", () => {
   for (const name of [
-    "Sun 等 - 2026 - Advanced Multifunctional Vitrimer-Based Composites.pdf",
-    "UnderstandingDeepLearning_02_09_26_C.pdf",
+    "ma3c01377_si_001.pdf",
+    "advs10440-sup-0001-suppmat.pdf",
+    "1-s2.0-S0009261420308812-mmc1.pdf",
+    "paper_ESI.pdf",
+  ]) {
+    assert.equal(looksLikeSupportingFilename(name), true, `should match: ${name}`);
+  }
+  for (const name of [
     "1-s2.0-S0009261420308812-main.pdf",
+    "UnderstandingDeepLearning_02_09_26_C.pdf",
     "高等代数 上册 第二版.pdf",
-    "paper.pdf",
-    // Real false positive from a library: the title ends in a standalone "Si".
-    // Matching a bare "si" token sent the article itself as Supporting
-    // Information, which is the dangerous direction of error.
-    "Shafe 等 - 2024 - Identification and Design of Better Diamine-Hardened Epoxy-Based Thermoset Shape Memory Polymers Si.pdf",
-    "Kanduč 等 - 2024 - Molecular dynamics simulations as support for experimental studies.pdf",
+    "situ_synthesis.pdf",
+    "simple_model.pdf",
   ]) {
-    assert.equal(looksLikeSupportingInfo(name), false, `should NOT be SI: ${name}`);
+    assert.equal(looksLikeSupportingFilename(name), false, `should not match: ${name}`);
   }
 });
 
-test("does not fire on words that merely contain the letters", () => {
-  // "situ", "simple", "design" all contain "si" but are not SI.
-  for (const name of ["situ_synthesis.pdf", "simple_model.pdf", "design.pdf"]) {
-    assert.equal(looksLikeSupportingInfo(name), false, `false positive: ${name}`);
-  }
-});
-
-test("handles paths, extensions and empty input", () => {
-  assert.equal(looksLikeSupportingInfo("storage:abc/paper_si_001.pdf"), true);
-  assert.equal(looksLikeSupportingInfo(""), false);
-  assert.equal(looksLikeSupportingInfo("   "), false);
+test("empty front matter never declares itself", () => {
+  assert.equal(declaresItselfSupportingInfo(""), false);
+  assert.equal(declaresItselfSupportingInfo("   \n  "), false);
+  assert.equal(isSupportingInfo({ name: "x.pdf", frontMatter: "" }).yes, false);
 });
 
 console.log("\nbundleSize");
