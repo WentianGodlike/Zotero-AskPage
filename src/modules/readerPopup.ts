@@ -1,4 +1,4 @@
-import { QUICK_ACTIONS } from "./prompts";
+import { QUICK_ACTIONS, resolveTaskPrompt } from "./prompts";
 import { openAskPanel, closePanel } from "./askPanel";
 
 /**
@@ -169,7 +169,9 @@ function wireButtons(
         reader,
         doc,
         selection,
-        question: action.question,
+        // The task prompt is user-editable, so resolve it at click time rather
+        // than baking the built-in default into the button.
+        question: resolveTaskPrompt(action),
       });
       // Dismiss Zotero's own popup so it does not overlap our panel.
       dismissSelectionPopup(doc);

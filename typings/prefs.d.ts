@@ -14,6 +14,17 @@ declare namespace _ZoteroTypes {
       "thinkingParams": string;
       "temperature": string;
       "showReasoning": boolean;
+      "promptRole": string;
+      "promptScenario": string;
+      "promptTaskExplain": string;
+      "promptTaskTranslate": string;
+      "promptTaskRole": string;
+      "sendNearby": boolean;
+      "sendFullText": boolean;
+      "fullTextMaxChars": number;
+      "saveToNote": boolean;
+      "saveToJson": boolean;
+      "logRequests": boolean;
     };
   }
 }

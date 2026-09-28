@@ -23,6 +23,21 @@ import { buildEndpoint, DeepSeekError, parseThinkingParams } from "../src/module
 import { renderMarkdown } from "../src/modules/markdown";
 import { HIGHLIGHT_ASK_PROVIDERS } from "../src/data/providers.data";
 import { validateSettings, getProvider } from "../src/modules/providers";
+import {
+  buildSystemPrompt,
+  buildUserMessage,
+  trimFullText,
+  extractNearby,
+  DEFAULT_SCENARIO_PROMPT,
+} from "../src/modules/prompts";
+import {
+  appendTurn,
+  makeSessionId,
+  sessionChars,
+  renderSessionHtml,
+  type Session,
+  type SessionTurn,
+} from "../src/modules/notes";
 import registerPreferencesPaneTests from "./preferencesPane.test";
 
 let passed = 0;
@@ -58,6 +73,29 @@ function test(name, fn) {
   };
   pending.push(run());
 }
+
+/** Minimal session fixtures for the notes tests. */
+function makeSession(itemID: number): Session {
+  const now = "2026-01-01T00:00:00.000Z";
+  return { id: "s1", itemID, createdAt: now, updatedAt: now, turns: [] };
+}
+
+function makeTurn(
+  question: string,
+  answer: string,
+  extra: Partial<SessionTurn> = {},
+): SessionTurn {
+  return {
+    question,
+    answer,
+    selection: "sel",
+    ts: "2026-01-01T00:00:00.000Z",
+    ...extra,
+  };
+}
+
+// NOTE_HEADING is not exported; keep the literal in sync with notes.ts.
+const NOTE_HEADING = "Highlight Ask 会话";
 
 /* ---------------------------------------------------------------- */
 /* A minimal DOM good enough for renderMarkdown                      */
@@ -618,6 +656,188 @@ test("never throws, whatever it is handed", () => {
   for (const d of nasty) {
     validateSettings(d as any);
   }
+});
+
+/* ---------------------------------------------------------------- */
+
+console.log("\nprompt layering");
+test("the system prompt stacks role then scenario", () => {
+  const system = buildSystemPrompt({
+    role: "ROLE_MARKER",
+    scenario: "SCENARIO_MARKER",
+  });
+  assert.ok(system.indexOf("ROLE_MARKER") < system.indexOf("SCENARIO_MARKER"));
+});
+
+test("the system prompt is identical for different questions (cache friendly)", () => {
+  // Stable prefix matters: providers cache on it, and it must not vary with the
+  // selection or the question.
+  const a = buildSystemPrompt();
+  const b = buildSystemPrompt();
+  assert.equal(a, b);
+  assert.ok(!a.includes("请解释这段内容"));
+});
+
+test("volatile content goes in the user message, not the system message", () => {
+  const system = buildSystemPrompt();
+  const user = buildUserMessage({
+    selection: "SELECTION_MARKER",
+    question: "QUESTION_MARKER",
+    nearby: "NEARBY_MARKER",
+    fullText: "FULLTEXT_MARKER",
+    title: "TITLE_MARKER",
+  });
+  for (const marker of [
+    "SELECTION_MARKER",
+    "QUESTION_MARKER",
+    "NEARBY_MARKER",
+    "FULLTEXT_MARKER",
+    "TITLE_MARKER",
+  ]) {
+    assert.ok(!system.includes(marker), `${marker} leaked into the system prompt`);
+    assert.ok(user.includes(marker), `${marker} missing from the user message`);
+  }
+});
+
+test("the default scenario prompt warns about PDF extraction damage", () => {
+  // This is the plugin's core value proposition; losing it silently would make
+  // formula answers much worse.
+  const scenario = DEFAULT_SCENARIO_PROMPT;
+  assert.match(scenario, /PDF/);
+  assert.match(scenario, /LaTeX|\$\.\.\.\$/);
+  assert.match(scenario, /抽取|提取/);
+});
+
+test("the user message omits absent optional sections", () => {
+  const user = buildUserMessage({ selection: "x", question: "y" });
+  assert.ok(!user.includes("全文"));
+  assert.ok(!user.includes("附近的原文"));
+  assert.ok(user.includes("选中"));
+});
+
+test("nearby text identical to the selection is not repeated", () => {
+  const user = buildUserMessage({
+    selection: "same",
+    question: "q",
+    nearby: "same",
+  });
+  assert.ok(!user.includes("附近的原文"));
+});
+
+console.log("\ntrimFullText");
+test("short text is passed through untouched", () => {
+  const r = trimFullText("hello", 100);
+  assert.equal(r.text, "hello");
+  assert.equal(r.truncated, false);
+});
+
+test("long text keeps the head and the tail, cutting the middle", () => {
+  const text = "A".repeat(400) + "MIDDLE" + "B".repeat(400);
+  const r = trimFullText(text, 100);
+  assert.equal(r.truncated, true);
+  assert.ok(r.text.startsWith("A"), "head kept");
+  assert.ok(r.text.endsWith("B"), "tail kept");
+  assert.ok(!r.text.includes("MIDDLE"), "middle dropped");
+  assert.ok(r.text.includes("省略"), "tells the reader something was cut");
+});
+
+test("result never exceeds the budget by much", () => {
+  const r = trimFullText("x".repeat(10000), 500);
+  const notice = r.text.length - 500;
+  assert.ok(notice < 200, `trim overflowed by ${notice} chars`);
+});
+
+test("handles empty and whitespace input", () => {
+  assert.deepEqual(trimFullText("", 100), { text: "", truncated: false });
+  assert.deepEqual(trimFullText("   ", 100), { text: "", truncated: false });
+});
+
+console.log("\nextractNearby");
+test("returns a window around the selection", () => {
+  const text = "BEFORE ".repeat(50) + "THE_SELECTION" + " AFTER".repeat(50);
+  const out = extractNearby(text, "THE_SELECTION", 200);
+  assert.ok(out.includes("THE_SELECTION"));
+  assert.ok(out.length <= 200 + "THE_SELECTION".length + 4);
+});
+
+test("falls back to a looser probe when the selection was normalised", () => {
+  // The panel joins hard-wrapped lines, so the stored text may not match exactly.
+  const text = "alpha beta gamma THE SELECTION IS HERE delta epsilon";
+  const out = extractNearby(text, "THE SELECTION IS HERE", 100);
+  assert.ok(out.includes("THE SELECTION IS HERE"), out);
+});
+
+test("returns empty when the selection is not in the text", () => {
+  assert.equal(extractNearby("some text", "NOT_PRESENT_ANYWHERE_XYZ"), "");
+});
+
+test("returns empty when either input is empty", () => {
+  assert.equal(extractNearby("", "x"), "");
+  assert.equal(extractNearby("text", ""), "");
+  assert.equal(extractNearby("text", "   "), "");
+});
+
+test("marks clipped ends", () => {
+  const text = "x".repeat(500) + "NEEDLE" + "y".repeat(500);
+  const out = extractNearby(text, "NEEDLE", 100);
+  assert.ok(out.startsWith("…"), "leading clip is marked");
+  assert.ok(out.endsWith("…"), "trailing clip is marked");
+});
+
+console.log("\nsession model");
+test("appendTurn does not mutate the original session", () => {
+  const s = makeSession(1);
+  const next = appendTurn(s, makeTurn("q1", "a1"));
+  assert.equal(s.turns.length, 0, "original untouched");
+  assert.equal(next.turns.length, 1);
+});
+
+test("appendTurn records the update time", () => {
+  const s = makeSession(1);
+  const next = appendTurn(s, makeTurn("q", "a", { ts: "2026-01-02T03:04:05.000Z" }));
+  assert.equal(next.updatedAt, "2026-01-02T03:04:05.000Z");
+});
+
+test("session ids are filesystem safe and unique per call", () => {
+  const a = makeSessionId(42, new Date("2026-01-02T03:04:05.678Z"));
+  const b = makeSessionId(42, new Date("2026-01-02T03:04:06.678Z"));
+  assert.notEqual(a, b);
+  assert.ok(!/[:.]/.test(a), `unsafe characters in ${a}`);
+  assert.ok(a.includes("42"));
+});
+
+test("sessionChars counts question and answer text", () => {
+  const s = makeSession(1);
+  s.turns.push(makeTurn("12345", "1234567890"));
+  assert.equal(sessionChars(s), 15);
+});
+
+test("renderSessionHtml escapes HTML from the paper and the model", () => {
+  const s = makeSession(1);
+  s.turns.push(makeTurn("<img src=x onerror=alert(1)>", "<script>bad()</script>"));
+  const html = renderSessionHtml(s);
+  assert.ok(!html.includes("<script>"), "model output was not escaped");
+  assert.ok(!html.includes("<img"), "selection was not escaped");
+  assert.ok(html.includes("&lt;script&gt;"));
+});
+
+test("renderSessionHtml keeps answers verbatim inside pre", () => {
+  // LaTeX must survive; the note editor would otherwise reflow $...$ and \.
+  const answer = "$$\\frac{a}{b}$$ and `code`";
+  const s = makeSession(1);
+  s.turns.push(makeTurn("q", answer));
+  const html = renderSessionHtml(s);
+  assert.ok(html.includes("\\frac{a}{b}"));
+  assert.ok(/<pre>[\s\S]*\\frac\{a\}\{b\}[\s\S]*<\/pre>/.test(html));
+});
+
+test("renderSessionHtml numbers turns in order", () => {
+  const s = makeSession(1);
+  s.turns.push(makeTurn("first", "a"));
+  s.turns.push(makeTurn("second", "b"));
+  const html = renderSessionHtml(s);
+  assert.ok(html.indexOf("1. first") < html.indexOf("2. second"));
+  assert.ok(html.includes(NOTE_HEADING));
 });
 
 /* ---------------------------------------------------------------- */
