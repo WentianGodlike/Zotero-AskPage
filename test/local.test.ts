@@ -34,6 +34,7 @@ import {
 import { HIGHLIGHT_ASK_PROVIDERS } from "../src/data/providers.data";
 import { validateSettings, getProvider } from "../src/modules/providers";
 import { matchesItem } from "../src/modules/sidebar";
+import { htmlToText, formatAnnotations } from "../src/modules/context";
 import {
   decodeEntities,
   parseHtmlToMathNodes,
@@ -1090,6 +1091,87 @@ test("a throwing Zotero.Items.get degrades to no match", () => {
   } finally {
     (globalThis as any).Zotero.Items.get = original;
   }
+});
+
+console.log("\nhtmlToText (notes)");
+test("strips markup and keeps the words", () => {
+  assert.equal(htmlToText("<p>hello <b>world</b></p>"), "hello world");
+});
+
+test("turns block boundaries into line breaks", () => {
+  const out = htmlToText("<p>one</p><p>two</p>");
+  assert.equal(out, "one\ntwo");
+});
+
+test("renders list items as bullets", () => {
+  const out = htmlToText("<ul><li>a</li><li>b</li></ul>");
+  assert.ok(out.includes("- a"), out);
+  assert.ok(out.includes("- b"), out);
+});
+
+test("drops script and style bodies entirely", () => {
+  // A note can contain pasted HTML; its scripts must not reach the prompt.
+  const out = htmlToText("<style>p{color:red}</style><p>x</p><script>evil()</script>");
+  assert.ok(!out.includes("color:red"), out);
+  assert.ok(!out.includes("evil"), out);
+  assert.ok(out.includes("x"));
+});
+
+test("decodes the entities Zotero notes contain", () => {
+  assert.equal(htmlToText("<p>a &amp; b &lt;c&gt; &nbsp;d</p>"), "a & b <c>  d");
+});
+
+test("collapses excessive blank lines", () => {
+  const out = htmlToText("<p>a</p><p></p><p></p><p>b</p>");
+  assert.ok(!/\n{3,}/.test(out), JSON.stringify(out));
+});
+
+test("handles </br> and empty input", () => {
+  assert.doesNotThrow(() => htmlToText("<br>"));
+  assert.equal(htmlToText(""), "");
+});
+
+console.log("\nformatAnnotations");
+test("lists highlights and comments with page labels", () => {
+  const out = formatAnnotations([
+    { text: "important result", comment: "why?", page: "42" },
+  ]);
+  assert.ok(out.includes("第 42 页"), out);
+  assert.ok(out.includes("高亮：important result"), out);
+  assert.ok(out.includes("批注：why?"), out);
+});
+
+test("returns empty for no annotations", () => {
+  assert.equal(formatAnnotations([]), "");
+});
+
+test("caps the number of entries and says how many were dropped", () => {
+  const many = Array.from({ length: 10 }, (_, i) => ({
+    text: `h${i}`,
+    comment: "",
+  }));
+  const out = formatAnnotations(many, 3);
+  assert.ok(out.includes("h0") && out.includes("h2"), out);
+  assert.ok(!out.includes("h5"), "should have stopped at the cap");
+  assert.ok(out.includes("另有 7 条"), out);
+});
+
+test("caps total length so annotations cannot crowd out the passage", () => {
+  const out = formatAnnotations(
+    [
+      { text: "x".repeat(500), comment: "" },
+      { text: "y".repeat(500), comment: "" },
+    ],
+    40,
+    600,
+  );
+  assert.ok(out.length < 800, `too long: ${out.length}`);
+});
+
+test("keeps a comment-only annotation", () => {
+  // A reader may comment without highlighting anything.
+  const out = formatAnnotations([{ text: "", comment: "note to self" }]);
+  assert.ok(out.includes("note to self"), out);
 });
 
 console.log("\ndecodeEntities");

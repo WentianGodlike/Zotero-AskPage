@@ -23,6 +23,9 @@ pref("promptTaskRole", "");
 // Attach the surrounding paragraphs of the paper to each question. Cheap and
 // often decisive, because a formula's definitions usually sit nearby.
 pref("sendNearby", true);
+// Attach the reader's own highlights and notes. Free (already in the library)
+// and unusually informative: they record what the reader judged important.
+pref("sendAnnotations", true);
 // Default state of the per-panel "全文" toggle.
 pref("sendFullText", false);
 // Character budget for the full text when it is attached.
