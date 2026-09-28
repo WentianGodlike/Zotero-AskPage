@@ -114,6 +114,10 @@ export const DEFAULT_SCENARIO_PROMPT = `关于你收到的文本，必须知道�
 - 逐个解释符号含义；说明每一步推导依据的是什么定义或定理
 - 若原式残缺，给出你推测的完整形式，并标出哪部分是你的推测
 
+关于「读者的标注与笔记」：
+- 它们反映读者已经读到哪、在意什么，用来理解提问的意图，不要逐条复述
+- 若读者的批注本身有误解，直接指出，不要顺着错误往下讲
+
 回答要求：
 - 用中文回答。术语默认译成中文；只有人名、模型名、缩写和符号保留原样；
   不要写成「中文（English）」这种括号夹注
@@ -218,6 +222,14 @@ export interface BuildContext {
   fullText?: string;
   /** Human-readable source title, for grounding. */
   title?: string;
+  /**
+   * The reader's own annotations, already formatted as a list.
+   * These carry the reader's judgement about what matters, so they are labelled
+   * clearly and placed before the passage for grounding.
+   */
+  annotations?: string;
+  /** The reader's own notes, already converted to plain text. */
+  notes?: string[];
 }
 
 /**
@@ -238,6 +250,18 @@ export function buildUserMessage(ctx: BuildContext): string {
         '"""\n' +
         ctx.fullText +
         '\n"""',
+    );
+  }
+  if (ctx.annotations && ctx.annotations.trim()) {
+    parts.push(
+      "读者在本文中做过的标注（高亮与批注，反映读者认为重要的地方）：\n" +
+        ctx.annotations,
+    );
+  }
+  if (ctx.notes && ctx.notes.length) {
+    parts.push(
+      "读者自己写的笔记：\n" +
+        ctx.notes.map((n, i) => `【笔记 ${i + 1}】\n${n}`).join("\n\n"),
     );
   }
   if (ctx.nearby && ctx.nearby.trim() && ctx.nearby.trim() !== ctx.selection.trim()) {

@@ -20,6 +20,7 @@ declare namespace _ZoteroTypes {
       "promptTaskTranslate": string;
       "promptTaskRole": string;
       "sendNearby": boolean;
+      "sendAnnotations": boolean;
       "sendFullText": boolean;
       "fullTextMaxChars": number;
       "saveToNote": boolean;

@@ -5,15 +5,12 @@ import {
   canAbort,
   type ChatMessage,
 } from "./deepseek";
-import {
-  buildFollowUpMessages,
-  buildInitialMessages,
-  extractNearby,
-} from "./prompts";
+import { buildFollowUpMessages, buildInitialMessages } from "./prompts";
 import { renderMarkdown, type RenderOptions } from "./markdown";
 import { installKatexStyles, renderMathInto } from "./katex";
 import { getPref } from "../utils/prefs";
 import { getPaperText, describePaperText, type PaperText } from "./fulltext";
+import { buildContext, type ContextBundle } from "./context";
 import {
   appendTurn,
   loadLatestSession,
@@ -262,14 +259,22 @@ export function createChatView(options: ChatViewOptions): ChatView {
     if (getPref("sendNearby") && paperText?.text) {
       bits.push("相邻段落");
     }
+    if (getPref("sendAnnotations")) {
+      bits.push("我的标注/笔记");
+    }
     if (wantFullText) {
       bits.push(`全文（${describePaperText(paperText)}）`);
     }
     contextLine.textContent = `上下文：${bits.join(" + ")}`;
+    // Warn when the full text was cut: the reader should know that the middle
+    // of the document is not being sent.
     contextLine.classList.toggle(
       "ha-chat-warn",
-      wantFullText && !paperText?.chars,
+      wantFullText && (!paperText?.chars || paperText.truncated),
     );
+    if (wantFullText && paperText?.truncated) {
+      contextLine.textContent += "（中间部分已截断）";
+    }
   }
 
   function providerKey(): string {
@@ -292,15 +297,53 @@ export function createChatView(options: ChatViewOptions): ChatView {
     return wantFullText && paperText ? paperText.chars : 0;
   }
 
-  function firstTurnContext() {
-    const nearby = getPref("sendNearby")
-      ? extractNearby(paperText?.text || "", seedSelection)
-      : "";
+  /** Latest assembled context, for the status line and for asking. */
+  let lastContext: ContextBundle | null = null;
+
+  /**
+   * Assemble what to send.
+   *
+   * Async because annotations and notes live in the library. Kept separate from
+   * the ask path so the status line can be accurate about what was included.
+   */
+  async function assembleContext(): Promise<{
+    nearby?: string;
+    fullText?: string;
+    annotations?: string;
+    notes?: string[];
+    title?: string;
+  }> {
+    const bundle = await buildContext({
+      itemID,
+      selection: seedSelection,
+      fullText: wantFullText,
+      paperText,
+    });
+    lastContext = bundle;
     return {
-      nearby: nearby || undefined,
-      fullText: wantFullText ? paperText?.text || undefined : undefined,
+      nearby: bundle.nearby,
+      fullText: bundle.fullText,
+      annotations: bundle.annotations.length
+        ? formatAnnotationsForPrompt(bundle)
+        : undefined,
+      notes: bundle.notes.length ? bundle.notes : undefined,
       title: session.title,
     };
+  }
+
+  /** Render the annotation list for the prompt. */
+  function formatAnnotationsForPrompt(bundle: ContextBundle): string {
+    // Imported lazily to keep the module graph flat.
+    return bundle.annotations
+      .slice(0, 40)
+      .map((a) => {
+        const page = a.page ? `（第 ${a.page} 页）` : "";
+        const bits: string[] = [];
+        if (a.text) bits.push(`高亮：${a.text}`);
+        if (a.comment) bits.push(`批注：${a.comment}`);
+        return `- ${page}${bits.join(" / ")}`;
+      })
+      .join("\n");
   }
 
   /* ---------------------------------------------------------------- */
@@ -555,9 +598,11 @@ export function createChatView(options: ChatViewOptions): ChatView {
     resizeInput();
 
     if (history.length === 0) {
-      const messages = buildInitialMessages(seedSelection, text, firstTurnContext());
-      history = messages;
-      void ask(messages, text, { text });
+      void assembleContext().then((ctx) => {
+        const messages = buildInitialMessages(seedSelection, text, ctx);
+        history = messages;
+        void ask(messages, text, { text });
+      });
     } else {
       const messages = buildFollowUpMessages(history, text);
       history = messages;
@@ -663,27 +708,32 @@ export function createChatView(options: ChatViewOptions): ChatView {
     input.value = seedQuestion;
     input.focus();
   } else if (seedQuestion) {
-    const messages = buildInitialMessages(
-      seedSelection,
-      seedQuestion,
-      firstTurnContext(),
-    );
-    history = messages;
-    void ask(messages, seedQuestion, { text: seedQuestion });
+    void assembleContext().then((ctx) => {
+      const messages = buildInitialMessages(seedSelection, seedQuestion, ctx);
+      history = messages;
+      void ask(messages, seedQuestion, { text: seedQuestion });
+    });
   }
 
   return {
     ask(selection: string, question: string) {
       seedSelection = (selection || "").trim();
       setQuote(seedSelection);
-      const messages = history.length
-        ? buildFollowUpMessages(
-            history,
-            `${question}\n\n（新选中的片段：\n"""\n${seedSelection}\n"""\n）`,
-          )
-        : buildInitialMessages(seedSelection, question, firstTurnContext());
-      history = messages;
-      void ask(messages, question, { text: question });
+      if (history.length) {
+        const messages = buildFollowUpMessages(
+          history,
+          `${question}\n\n（新选中的片段：\n"""\n${seedSelection}\n"""\n）`,
+        );
+        history = messages;
+        void ask(messages, question, { text: question });
+        return;
+      }
+      // First question of this session: assemble the full context first.
+      void assembleContext().then((ctx) => {
+        const messages = buildInitialMessages(seedSelection, question, ctx);
+        history = messages;
+        void ask(messages, question, { text: question });
+      });
     },
     prefill(question: string) {
       input.value = question;
