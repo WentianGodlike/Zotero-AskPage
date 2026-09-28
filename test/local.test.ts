@@ -31,6 +31,11 @@ import { HIGHLIGHT_ASK_PROVIDERS } from "../src/data/providers.data";
 import { validateSettings, getProvider } from "../src/modules/providers";
 import { matchesItem } from "../src/modules/sidebar";
 import {
+  extractKatexCss,
+  mathTree,
+  type MathNode,
+} from "../src/modules/katex";
+import {
   buildSystemPrompt,
   buildUserMessage,
   trimFullText,
@@ -906,6 +911,182 @@ test("a throwing Zotero.Items.get degrades to no match", () => {
   } finally {
     (globalThis as any).Zotero.Items.get = original;
   }
+});
+
+console.log("\nextractKatexCss");
+const SAMPLE_CSS = `
+@font-face{font-family:KaTeX_Main;src:url(assets/fonts/KaTeX_Main-Regular.f650f111.woff2) format("woff2")}
+@font-face{font-family:Custom;src:url(assets/fonts/other.woff2)}
+.katex{font:normal 1.21em KaTeX_Main}
+.katex .mfrac{display:inline-block}
+.prosemirror-editor{border:1px solid red}
+.note-editor-toolbar{background:#eee}
+`;
+
+test("keeps KaTeX rules and drops unrelated ones", () => {
+  const css = extractKatexCss(SAMPLE_CSS);
+  assert.ok(css.includes(".katex"), "KaTeX layout rules kept");
+  assert.ok(css.includes("mfrac"), "KaTeX sub-rules kept");
+  assert.ok(!css.includes("prosemirror"), "ProseMirror styling must not leak in");
+  assert.ok(!css.includes("note-editor-toolbar"), "editor chrome must not leak in");
+});
+
+test("keeps only KaTeX fonts", () => {
+  const css = extractKatexCss(SAMPLE_CSS);
+  assert.ok(css.includes("KaTeX_Main"), "KaTeX font kept");
+  assert.ok(!css.includes("other.woff2"), "unrelated font dropped");
+});
+
+test("rewrites relative font URLs to absolute ones", () => {
+  // Relative paths would resolve against the reader document, not the stylesheet.
+  const css = extractKatexCss(SAMPLE_CSS);
+  assert.ok(
+    css.includes("resource://zotero/note-editor/assets/fonts/KaTeX_Main-Regular"),
+    `font URL not made absolute: ${css}`,
+  );
+  assert.ok(!/url\(\s*['"]?assets\//.test(css), "a relative URL survived");
+});
+
+test("leaves already-absolute URLs alone", () => {
+  const css = extractKatexCss(
+    '@font-face{font-family:KaTeX_X;src:url(resource://x/y.woff2)}',
+  );
+  assert.ok(css.includes("resource://x/y.woff2"));
+  assert.ok(!css.includes("note-editor/resource://"));
+});
+
+test("accepts a custom font base", () => {
+  const css = extractKatexCss(
+    '@font-face{font-family:KaTeX_X;src:url(f.woff2)}',
+    "chrome://custom/",
+  );
+  assert.ok(css.includes("chrome://custom/f.woff2"), css);
+});
+
+test("returns empty string for CSS with no KaTeX rules", () => {
+  assert.equal(extractKatexCss(".a{color:red}").trim(), "");
+});
+
+test("does not choke on empty input", () => {
+  assert.equal(extractKatexCss("").trim(), "");
+});
+
+console.log("\nmathTree");
+function flatten(node: MathNode): string {
+  if (typeof node === "string") {
+    return node;
+  }
+  return (node.children ?? []).map(flatten).join("");
+}
+function classes(node: MathNode, acc: string[] = []): string[] {
+  if (typeof node !== "string") {
+    if (node.className) acc.push(node.className);
+    for (const c of node.children ?? []) classes(c, acc);
+  }
+  return acc;
+}
+
+test("wraps output in the class names KaTeX CSS expects", () => {
+  const tree = mathTree("x");
+  assert.equal(tree === "string" ? "" : tree.className, "katex");
+});
+
+test("display mode adds katex-display", () => {
+  const tree = mathTree("x", true);
+  assert.ok(classes(tree).includes("katex-display"));
+});
+
+test("maps Greek letters", () => {
+  assert.equal(flatten(mathTree("\\alpha")), "\u03b1");
+  assert.equal(flatten(mathTree("\\Omega")), "\u03a9");
+});
+
+test("maps operators", () => {
+  assert.equal(flatten(mathTree("a \\leq b")), "a \u2264 b");
+  assert.equal(flatten(mathTree("x \\in X")), "x \u2208 X");
+});
+
+test("renders fractions with a numerator and denominator", () => {
+  const tree = mathTree("\\frac{a}{b}");
+  assert.ok(classes(tree).includes("mfrac"));
+  const flat = flatten(tree);
+  assert.ok(flat.includes("a") && flat.includes("b"), flat);
+});
+
+test("handles nested fractions", () => {
+  const flat = flatten(mathTree("\\frac{\\frac{a}{b}}{c}"));
+  assert.ok(flat.includes("a") && flat.includes("b") && flat.includes("c"), flat);
+});
+
+test("renders square roots", () => {
+  const flat = flatten(mathTree("\\sqrt{x}"));
+  assert.ok(flat.includes("\u221a"), flat);
+  assert.ok(flat.includes("x"), flat);
+});
+
+test("uses Unicode sub/superscripts where they exist", () => {
+  // Nicer typography than CSS shifting, and it survives copy/paste.
+  assert.equal(flatten(mathTree("x^2")), "x\u00b2");
+  assert.equal(flatten(mathTree("x_i")), "x\u1d62");
+});
+
+test("renders an expression in a script", () => {
+  // n, + and 1 all have Unicode superscript forms, so this stays as text.
+  assert.equal(flatten(mathTree("x^{n+1}")), "x\u207f\u207a\u00b9");
+});
+
+test("falls back to styled spans when a script has no Unicode form", () => {
+  // "alpha" has no superscript form, so it must be shifted with CSS instead.
+  const tree = mathTree("x^{\\alpha}");
+  const flat = flatten(tree);
+  assert.ok(flat.includes("\u03b1"), flat);
+  const styles: string[] = [];
+  const walk = (n: MathNode) => {
+    if (typeof n !== "string") {
+      if (n.style) styles.push(n.style);
+      for (const c of n.children ?? []) walk(c);
+    }
+  };
+  walk(tree);
+  assert.ok(
+    styles.some((st) => st.includes("vertical-align:super")),
+    `no CSS-shifted script found: ${JSON.stringify(styles)}`,
+  );
+});
+
+test("renders big operators with limits", () => {
+  const flat = flatten(mathTree("\\sum_{i=1}^{n} x_i"));
+  assert.ok(flat.includes("\u2211"), "sum sign present");
+  // Lower limit i=1 renders as Unicode subscripts.
+  assert.ok(flat.includes("\u1d62"), `lower limit missing: ${flat}`);
+  assert.ok(flat.includes("\u208c"), `subscript "=" missing: ${flat}`);
+  // Upper limit n renders as a Unicode superscript.
+  assert.ok(flat.includes("\u207f"), `upper limit missing: ${flat}`);
+});
+
+test("keeps unknown commands visible instead of dropping them", () => {
+  // Silently deleting a symbol would produce a confidently wrong formula.
+  const flat = flatten(mathTree("\\weirdcmd x"));
+  assert.ok(flat.includes("weirdcmd"), flat);
+});
+
+test("handles left/right delimiters", () => {
+  const flat = flatten(mathTree("\\left( x \\right)"));
+  assert.ok(flat.includes("(") && flat.includes(")"), flat);
+});
+
+test("survives unbalanced braces", () => {
+  // Streaming can cut a formula mid-group.
+  assert.doesNotThrow(() => flatten(mathTree("\\frac{a}{")));
+  assert.doesNotThrow(() => flatten(mathTree("{")));
+  assert.doesNotThrow(() => flatten(mathTree("")));
+});
+
+test("does not emit HTML strings (zero innerHTML rule)", () => {
+  // The tree must be data, never markup that a caller might inject.
+  const json = JSON.stringify(mathTree("\\frac{<b>a</b>}{c}"));
+  assert.ok(!json.includes("<span"), "tree must not contain markup");
+  assert.ok(json.includes("mfrac"), json);
 });
 
 console.log("\nabort capability");
