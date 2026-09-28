@@ -23,6 +23,7 @@ import { buildEndpoint, DeepSeekError, parseThinkingParams } from "../src/module
 import { renderMarkdown } from "../src/modules/markdown";
 import { HIGHLIGHT_ASK_PROVIDERS } from "../src/data/providers.data";
 import { validateSettings, getProvider } from "../src/modules/providers";
+import { matchesItem } from "../src/modules/sidebar";
 import {
   buildSystemPrompt,
   buildUserMessage,
@@ -842,6 +843,64 @@ test("renderSessionHtml numbers turns in order", () => {
 });
 
 /* ---------------------------------------------------------------- */
+
+console.log("\nmatchesItem (reader item vs pane item)");
+// A reader's itemID is the PDF attachment; the item pane usually shows the
+// parent item. Comparing ids naively made the sidebar claim it was "not ready"
+// even while it was on screen.
+const fakeItems: Record<number, any> = {
+  100: { id: 100, parentItemID: false, getAttachments: () => [101, 102] }, // the paper
+  101: { id: 101, parentItemID: 100, getAttachments: () => [] }, // a PDF of it
+  102: { id: 102, parentItemID: 100, getAttachments: () => [] }, // another PDF
+  200: { id: 200, parentItemID: false, getAttachments: () => [201] }, // unrelated
+  201: { id: 201, parentItemID: 200, getAttachments: () => [] },
+};
+(globalThis as any).Zotero = {
+  debug: () => {},
+  Items: { get: (id: number) => fakeItems[id] },
+};
+
+test("identical ids match", () => {
+  assert.equal(matchesItem(100, 100), true);
+});
+
+test("a PDF attachment matches its parent paper", () => {
+  // The exact case that broke: reader says 101, the pane shows 100.
+  assert.equal(matchesItem(101, 100), true);
+});
+
+test("a parent paper matches one of its attachments", () => {
+  assert.equal(matchesItem(100, 101), true);
+  assert.equal(matchesItem(100, 102), true);
+});
+
+test("two attachments of the same paper are not the same item", () => {
+  // They are siblings, not the same document; treating them as equal would let
+  // one PDF's conversation serve another's question.
+  assert.equal(matchesItem(101, 102), false);
+});
+
+test("unrelated items do not match", () => {
+  assert.equal(matchesItem(100, 200), false);
+  assert.equal(matchesItem(101, 201), false);
+});
+
+test("an unknown id does not match and does not throw", () => {
+  assert.equal(matchesItem(999, 100), false);
+  assert.equal(matchesItem(100, 999), false);
+});
+
+test("a throwing Zotero.Items.get degrades to no match", () => {
+  const original = (globalThis as any).Zotero.Items.get;
+  (globalThis as any).Zotero.Items.get = () => {
+    throw new Error("boom");
+  };
+  try {
+    assert.equal(matchesItem(1, 2), false);
+  } finally {
+    (globalThis as any).Zotero.Items.get = original;
+  }
+});
 
 console.log("\npickSessionFiles");
 test("does not confuse item 1 with item 10", () => {

@@ -1,5 +1,5 @@
 import { QUICK_ACTIONS, resolveTaskPrompt } from "./prompts";
-import { askInSidebar } from "./sidebar";
+import { askInSidebar, anyViewMounted } from "./sidebar";
 
 /**
  * Reader integration: add buttons to Zotero's text-selection popup.
@@ -167,13 +167,14 @@ function wireButtons(
         question,
       });
       if (!delivered) {
-        // The sidebar section only exists while a reader tab is mounted. When it
-        // is not ready yet, say so instead of failing silently.
+        // Distinguish "the pane is not open at all" from "a pane for another
+        // item is open" — the fix differs, and a vague message sends the user
+        // looking in the wrong place.
+        const message = anyViewMounted()
+          ? "这个对话属于另一篇文献。请先选中本篇文献，让右侧「AI 助手」显示出来再试。"
+          : "右侧还没有打开「AI 助手」面板。展开右侧栏的信息区，让 Highlight Ask 出现后再试。";
         new ztoolkit.ProgressWindow("Highlight Ask", { closeOnClick: true })
-          .createLine({
-            text: "侧边栏还没准备好，请打开右侧边栏的「AI 助手」后再试。",
-            type: "fail",
-          })
+          .createLine({ text: message, type: "fail" })
           .show();
       }
       // Dismiss Zotero's own popup so it does not overlap the sidebar.
