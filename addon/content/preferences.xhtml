@@ -370,6 +370,18 @@
         </div>
       </div>
       <div class="field">
+        <div class="check">
+          <input id="alwaysRetrieve" type="checkbox" />
+          <label for="alwaysRetrieve" style="font-weight: 400; margin: 0">
+            即使文档放得下也优先检索
+          </label>
+        </div>
+        <div class="desc">
+          放得下就整篇发送，通常在问"整篇讲了什么"时才值得。开启本项后，即使文档
+          不长也只用检索段落，显著降低每次提问的 token 消耗。
+        </div>
+      </div>
+      <div class="field">
         <label for="retrieveTopK">检索段落数</label>
         <input id="retrieveTopK" type="number" min="1" max="20" step="1" />
         <div class="desc">每段约 1200 字符；5 段约 6K tokens。</div>
