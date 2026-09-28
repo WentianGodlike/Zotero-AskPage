@@ -204,6 +204,49 @@ export function findTextLayer(node: Node): HTMLElement | null {
   return null;
 }
 
+/**
+ * Judge whether a selection is maths rather than prose.
+ *
+ * Two signals, both cheap and both one-sided:
+ *
+ *  - **Text**: prose is mostly letters. A formula has few, and they are usually
+ *    single-letter variables surrounded by operators and digits.
+ *  - **Shape**: a formula is a single line, so it is wide and short. Several
+ *    lines of prose produce a tall block.
+ *
+ * Deliberately conservative about calling something a formula: the cost of a
+ * wrong "yes" is an unreadable screenshot where the text would have worked.
+ */
+export function looksLikeFormulaSelection(
+  text: string,
+  rect: { width: number; height: number },
+): boolean {
+  const trimmed = String(text || "").trim();
+  if (!trimmed) {
+    return false;
+  }
+  const letters = (trimmed.match(/[A-Za-z]/g) || []).length;
+  const digits = (trimmed.match(/[0-9]/g) || []).length;
+  const mathMarks = (
+    trimmed.match(/[=+\-−×÷^_(){}\[\]|∑∏∫√≈≤≥≠∂∇αβγδεζηθικλμνξπρστυφχψωΩΔΦ]/g) || []
+  ).length;
+
+  const alphaRatio = letters / trimmed.length;
+  const markRatio = mathMarks / Math.max(1, letters + digits + mathMarks);
+
+  // A single line, or nearly so.
+  const singleLine = rect.height <= rect.width * 0.6;
+
+  // Symbol-dense and letter-sparse reads as maths; long prose does not.
+  const mathy = markRatio >= 0.35 && alphaRatio <= 0.55;
+  const prose = alphaRatio > 0.7 && markRatio < 0.2;
+
+  if (prose) {
+    return false;
+  }
+  return mathy && singleLine;
+}
+
 /* ------------------------------------------------------------------ */
 /* Cropping                                                            */
 /* ------------------------------------------------------------------ */
@@ -369,6 +412,17 @@ export interface PendingCapture {
   detail: string;
   /** The selection text, for cross-checking against the crop. */
   text: string;
+  /**
+   * Whether the crop looks like a formula rather than a passage of prose.
+   *
+   * A screenshot helps only when the selection is mostly maths. Selecting three
+   * paragraphs that happen to contain a formula produces a wide, short image
+   * that the vision model downscales until the formula is unreadable — the text
+   * would have served better there, so the reader is told which case they are in.
+   */
+  looksLikeFormula: boolean;
+  /** Height / width of the crop. Large values mean a block of prose. */
+  aspect: number;
 }
 
 /**
@@ -489,12 +543,16 @@ export function captureGeometry(
       };
     }
 
+    const text = String(selection.toString() || "");
+    const aspect = rect.width > 0 ? rect.height / rect.width : 0;
     return {
       ok: true,
       canvas,
       rect,
       detail: `canvas=${canvas.width}x${canvas.height} rect=${rect.left},${rect.top} ${rect.width}x${rect.height} scale=${sx.toFixed(2)}`,
-      text: String(selection.toString() || ""),
+      text,
+      looksLikeFormula: looksLikeFormulaSelection(text, rect),
+      aspect,
     };
   } catch (e) {
     return {
