@@ -1,4 +1,10 @@
-<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  No XML declaration (<?xml ... ?>) here, deliberately.
+  Zotero parses this file with `_parseXHTMLToFragment()`, which wraps the whole
+  file in a <div> before parsing. An XML declaration is only legal at the very
+  start of a document, so including one makes the wrapped document ill-formed
+  and the pane silently fails to load, leaving a blank settings page.
+-->
 <html
   xmlns="http://www.w3.org/1999/xhtml"
   xmlns:html="http://www.w3.org/1999/xhtml"
