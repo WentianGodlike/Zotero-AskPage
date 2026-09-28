@@ -1,33 +1,37 @@
 {
-  "name": "zotero-plugin-template",
+  "name": "zotero-highlight-ask",
   "type": "module",
-  "version": "3.1.0",
-  "description": "Zotero Plugin Template",
+  "version": "0.2.1",
+  "description": "Highlight text in Zotero PDF reader and ask DeepSeek to explain it.",
   "config": {
-    "addonName": "Zotero Plugin Template",
-    "addonID": "addontemplate@euclpts.com",
-    "addonRef": "addontemplate",
-    "addonInstance": "AddonTemplate",
-    "prefsPrefix": "extensions.zotero.addontemplate"
+    "addonName": "Highlight Ask",
+    "addonID": "highlight-ask@yangruiyu.dev",
+    "addonRef": "highlightask",
+    "addonInstance": "HighlightAsk",
+    "prefsPrefix": "extensions.zotero.highlightask"
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/windingwind/zotero-plugin-template.git"
+    "url": "git+https://github.com/local/highlight-ask.git"
   },
-  "author": "windingwind",
+  "author": "yangruiyu (based on zotero-plugin-template by windingwind and contributors)",
   "bugs": {
     "url": "https://github.com/windingwind/zotero-plugin-template/issues"
   },
-  "homepage": "https://github.com/windingwind/zotero-plugin-template#readme",
+  "homepage": "",
   "license": "AGPL-3.0-or-later",
   "scripts": {
     "start": "zotero-plugin serve",
-    "build": "zotero-plugin build && tsc --noEmit",
+    "build": "zotero-plugin build && tsc --noEmit && python3 scripts/check-manifest.py",
     "lint:check": "prettier --check . && eslint .",
     "lint:fix": "prettier --write . && eslint . --fix",
     "release": "zotero-plugin release",
     "test": "zotero-plugin test",
-    "update-deps": "npm update --save"
+    "update-deps": "npm update --save",
+    "test:local": "esbuild test/local.test.ts --bundle --platform=node --format=esm --outfile=.scaffold/local.test.mjs --log-level=warning && node .scaffold/local.test.mjs",
+    "check": "tsc --noEmit && npm run test:local",
+    "icons": "python3 scripts/make-icons.py",
+    "check:manifest": "python3 scripts/check-manifest.py"
   },
   "dependencies": {
     "zotero-plugin-toolkit": "^5.1.0-beta.13"
