@@ -43,6 +43,11 @@ import {
   unionRects,
   dataUrlBytes,
   looksLikeFormulaSelection,
+  planTiles,
+  effectiveTileScale,
+  estimateImageTokens,
+  TILE_PIXEL_BUDGET,
+  MAX_IMAGE_DIMENSION,
 } from "../src/modules/screenshot";
 import {
   htmlToText,
@@ -1108,6 +1113,119 @@ test("a throwing Zotero.Items.get degrades to no match", () => {
   } finally {
     (globalThis as any).Zotero.Items.get = original;
   }
+});
+
+console.log("\nplanTiles");
+// The provider resamples every image to roughly 1300x1300 pixels and bills a
+// flat maximum per image, so a tile must stay inside that budget or the maths
+// inside it stops being legible.
+test("a single formula stays one tile at full scale", () => {
+  const rect = { left: 626, top: 1609, width: 496, height: 173 };
+  assert.equal(planTiles(rect, 2).length, 1);
+  assert.equal(effectiveTileScale(rect, 2), 2);
+});
+
+test("a full page is split until every tile fits the budget", () => {
+  const rect = { left: 0, top: 0, width: 1700, height: 2200 };
+  const tiles = planTiles(rect, 2);
+  assert.ok(tiles.length > 1, `expected splitting, got ${tiles.length}`);
+  const scale = effectiveTileScale(rect, 2);
+  for (const t of tiles) {
+    assert.ok(
+      t.width * t.height * scale * scale <= TILE_PIXEL_BUDGET + 1,
+      `tile ${t.width}x${t.height} exceeds the budget`,
+    );
+  }
+});
+
+test("tiles cover the whole rectangle", () => {
+  const rect = { left: 10, top: 20, width: 800, height: 1000 };
+  const tiles = planTiles(rect, 2);
+  assert.equal(tiles[0].top, rect.top, "first tile must start at the top");
+  const last = tiles[tiles.length - 1];
+  assert.equal(last.top + last.height, rect.top + rect.height, "must reach the bottom");
+});
+
+test("consecutive tiles overlap so a formula on a boundary stays whole", () => {
+  const rect = { left: 0, top: 0, width: 400, height: 2000 };
+  const tiles = planTiles(rect, 2);
+  assert.ok(tiles.length > 1);
+  for (let i = 1; i < tiles.length; i++) {
+    const prevEnd = tiles[i - 1].top + tiles[i - 1].height;
+    assert.ok(tiles[i].top < prevEnd, `tile ${i} does not overlap the previous one`);
+  }
+});
+
+test("width is never split", () => {
+  // Cutting a formula vertically would separate the two sides of an equation.
+  const rect = { left: 0, top: 0, width: 3000, height: 400 };
+  for (const t of planTiles(rect, 2)) {
+    assert.equal(t.left, rect.left);
+    assert.equal(t.width, rect.width);
+  }
+});
+
+test("degenerate rectangles produce no tiles", () => {
+  assert.deepEqual(planTiles({ left: 0, top: 0, width: 0, height: 100 }), []);
+  assert.deepEqual(planTiles({ left: 0, top: 0, width: 100, height: 0 }), []);
+});
+
+test("scale never drops below the floor, so something always renders", () => {
+  const huge = { left: 0, top: 0, width: 20000, height: 20000 };
+  assert.ok(effectiveTileScale(huge, 2) >= 0.05);
+});
+
+test("scale never exceeds the requested scale", () => {
+  // A tiny crop must not be blown up past the requested factor.
+  const tiny = { left: 0, top: 0, width: 20, height: 10 };
+  assert.ok(effectiveTileScale(tiny, 2) <= 2);
+});
+
+test("a wide selection is scaled by the side limit, then split", () => {
+  // 6000x200 is only 1.2 Mpx, well under the 1.69 Mpx budget, so the *budget*
+  // asks for no downscaling. The per-side limit still does: 6000 at 2x would be
+  // 12000 px, and exceeding 8192 px fails the request rather than just looking
+  // worse. So the scale lands on 8192/6000 and the height is divided.
+  const rect = { left: 0, top: 0, width: 6000, height: 200 };
+  const scale = effectiveTileScale(rect, 2);
+  assert.ok(Math.abs(scale - MAX_IMAGE_DIMENSION / 6000) < 1e-9, `got ${scale}`);
+  assert.ok(planTiles(rect, 2).length > 1);
+});
+
+test("the per-side limit is enforced even under the pixel budget", () => {
+  // 6000 px wide at 2x would be 12000 px, over the 8192 px hard limit, which is
+  // a request error rather than a quality loss.
+  const rect = { left: 0, top: 0, width: 6000, height: 200 };
+  const scale = effectiveTileScale(rect, 2);
+  assert.ok(
+    rect.width * scale <= MAX_IMAGE_DIMENSION,
+    `scaled width ${rect.width * scale} exceeds the limit`,
+  );
+});
+
+test("no tile ever exceeds the per-side limit", () => {
+  for (const rect of [
+    { left: 0, top: 0, width: 6000, height: 200 },
+    { left: 0, top: 0, width: 20000, height: 20000 },
+    { left: 0, top: 0, width: 1700, height: 2200 },
+    { left: 0, top: 0, width: 100, height: 9000 },
+  ]) {
+    const scale = effectiveTileScale(rect, 2);
+    for (const t of planTiles(rect, 2)) {
+      assert.ok(
+        t.width * scale <= MAX_IMAGE_DIMENSION + 1 &&
+          t.height * scale <= MAX_IMAGE_DIMENSION + 1,
+        `${t.width}x${t.height} @${scale} exceeds the limit`,
+      );
+    }
+  }
+});
+
+test("image tokens follow the provider's flat per-image maximum", () => {
+  // 2000x2000 and 5000x5000 cost the same after resampling.
+  assert.equal(estimateImageTokens(1), 1024);
+  assert.equal(estimateImageTokens(5), 5120);
+  assert.equal(estimateImageTokens(0), 0);
 });
 
 console.log("\nlooksLikeFormulaSelection");

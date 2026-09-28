@@ -11,7 +11,9 @@ import { installKatexStyles, renderMathInto } from "./katex";
 import {
   captureGeometry,
   describeGeometry,
+  estimateImageTokens,
   locateSelection,
+  renderCaptureTiles,
   renderPendingCapture,
   takePendingOutcome,
   takePendingCapture,
@@ -86,6 +88,15 @@ export function createChatView(options: ChatViewOptions): ChatView {
   ensureStyles(doc);
   container.replaceChildren();
 
+  /**
+   * Whether questions carry a screenshot of the selection.
+   *
+   * A plain toggle rather than an automatic decision: only the reader knows
+   * whether this question is about a formula, and the token cost is on the
+   * status line. Declared here because the header builds the toggle.
+   */
+  let wantScreenshot = Boolean(getPref("sendScreenshot"));
+
   /* ---------------------------------------------------------------- */
   /* DOM                                                               */
   /* ---------------------------------------------------------------- */
@@ -115,7 +126,21 @@ export function createChatView(options: ChatViewOptions): ChatView {
   shotBtn.classList.add("ha-chat-ghost");
   shotBtn.hidden = !getPref("debugScreenshot");
 
-  head.append(title, spacer, fullTextBtn, shotBtn, copyBtn, clearBtn);
+  // Whether to attach the screenshot to questions. The reader is the only one
+  // who knows if this question is about a formula, and the token cost is shown
+  // in the status line, so this is a plain toggle rather than automatic.
+  const imageBtn = mkButton(doc, "带图", "提问时附带选区截图（公式识别用）");
+  imageBtn.classList.toggle("ha-chat-on", wantScreenshot);
+  imageBtn.addEventListener("click", () => {
+    wantScreenshot = !wantScreenshot;
+    imageBtn.classList.toggle("ha-chat-on", wantScreenshot);
+    imageBtn.title = wantScreenshot
+      ? "提问时会附带选区截图，点此关闭"
+      : "提问时附带选区截图（公式识别用）";
+    paintContextLine();
+  });
+
+  head.append(title, spacer, imageBtn, fullTextBtn, shotBtn, copyBtn, clearBtn);
 
   const contextLine = doc.createElement("div");
   contextLine.className = "ha-chat-context";
@@ -310,10 +335,15 @@ export function createChatView(options: ChatViewOptions): ChatView {
     }
     // Show the size, because the gap between "selection" and "whole book" is a
     // factor of ~50 in cost and only the reader can judge if it is worth it.
+    if (wantScreenshot && lastImageCount > 0) {
+      bits.push(`截图 ${lastImageCount} 张`);
+    }
     if (lastContext) {
       const { tokens } = bundleSize(lastContext);
-      if (tokens > 0) {
-        contextLine.textContent += ` · 约 ${tokens.toLocaleString()} tokens`;
+      const imageTokens = estimateImageTokens(lastImageCount);
+      const total = tokens + imageTokens;
+      if (total > 0) {
+        contextLine.textContent += ` · 约 ${total.toLocaleString()} tokens`;
       }
     }
   }
@@ -340,6 +370,8 @@ export function createChatView(options: ChatViewOptions): ChatView {
 
   /** Latest assembled context, for the status line and for asking. */
   let lastContext: ContextBundle | null = null;
+  /** Tiles attached to the most recent question, for the status line. */
+  let lastImageCount = 0;
 
   /**
    * Assemble what to send.
@@ -353,6 +385,7 @@ export function createChatView(options: ChatViewOptions): ChatView {
     annotations?: string;
     notes?: string[];
     supportingInfo?: Array<{ name: string; text: string }>;
+    images?: Array<{ dataUrl: string }>;
     title?: string;
   }> {
     const bundle = await buildContext({
@@ -362,6 +395,26 @@ export function createChatView(options: ChatViewOptions): ChatView {
       paperText,
     });
     lastContext = bundle;
+    // Attach a screenshot of the selection when there is one stashed. Large
+    // selections are tiled rather than shrunk: the provider resamples any image
+    // over ~1300x1300, which is what makes an embedded formula unreadable in a
+    // wide crop, while several tiles each keep their resolution.
+    let images: Array<{ dataUrl: string }> | undefined;
+    if (wantScreenshot) {
+      const pending = takePendingCapture();
+      if (pending) {
+        const tiles = renderCaptureTiles(pending);
+        if (tiles.length) {
+          images = tiles.map((t) => ({ dataUrl: t.dataUrl }));
+          lastImageCount = tiles.length;
+          Zotero.debug(
+            `[Highlight Ask] attaching ${tiles.length} tile(s): ${pending.detail}`,
+          );
+        }
+      }
+    }
+    lastImageCount = images ? images.length : 0;
+
     paintContextLine();
     return {
       nearby: bundle.nearby,
@@ -373,6 +426,7 @@ export function createChatView(options: ChatViewOptions): ChatView {
       supportingInfo: bundle.supportingInfo.length
         ? bundle.supportingInfo.map((d) => ({ name: d.name, text: d.text }))
         : undefined,
+      images,
       title: session.title,
     };
   }
@@ -742,16 +796,17 @@ export function createChatView(options: ChatViewOptions): ChatView {
         }
         const path = await saveShot(shot.dataUrl);
         flash(shotBtn, `${shot.width}×${shot.height}`);
-        // Warn when the crop is a passage rather than a formula: the model
-        // downscales wide images, so an embedded formula can end up unreadable
-        // while the text version would have worked.
-        const advice = outcome.looksLikeFormula
-          ? ""
-          : "\n提示：这段选区看起来是成段文字。截图会被缩小，其中的公式可能反而不清楚——" +
-            "划选单个公式再截效果最好。";
+        // No advice about "select a smaller region": a passage containing
+        // formulas is a legitimate thing to ask about, and it works because
+        // large selections are tiled rather than shrunk.
+        const tiles = renderCaptureTiles(outcome);
+        const tileNote =
+          tiles.length > 1
+            ? `\n提问时将附上 ${tiles.length} 张分块图（约 ${estimateImageTokens(tiles.length).toLocaleString()} tokens）`
+            : "\n提问时将附上这 1 张图";
         showHint(
-          `已保存 ${shot.width}×${shot.height} 到：${path ?? "（未能写盘）"}\n${outcome.detail}${advice}`,
-          path ? (outcome.looksLikeFormula ? "ok" : "warn") : "warn",
+          `已保存 ${shot.width}×${shot.height} 到：${path ?? "（未能写盘）"}\n${outcome.detail}${tileNote}`,
+          "ok",
         );
         return;
       }

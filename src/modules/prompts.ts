@@ -1,4 +1,4 @@
-import type { ChatMessage } from "./deepseek";
+import type { ChatMessage, ContentPart } from "./deepseek";
 import { getPref } from "../utils/prefs";
 
 /**
@@ -113,6 +113,12 @@ export const DEFAULT_SCENARIO_PROMPT = `关于你收到的文本，必须知道�
 - 一个 $$...$$ 内只放一个公式；不要把多个公式塞进同一个 $$ 里
 - 逐个解释符号含义；说明每一步推导依据的是什么定义或定理
 - 若原式残缺，给出你推测的完整形式，并标出哪部分是你的推测
+
+关于随附的截图：
+- 若附带了选区截图，它是为公式准备的：PDF 抽取会把分式压平、上下标错位、
+  范数竖线丢失，而截图保留了原始排版
+- 以截图为准还原公式，并与文本内容相互印证；两者冲突时以截图为准
+- 仍按上面的要求输出 LaTeX，不要描述图片本身
 
 关于 Supporting Information：
 - 若提供了 SI，它常含正文放不下的推导、参数表与补充图，优先在其中找依据
@@ -291,14 +297,57 @@ export function buildUserMessage(ctx: BuildContext): string {
   return parts.join("\n\n");
 }
 
+export interface ImageAttachment {
+  /** Base64 data URL. */
+  dataUrl: string;
+}
+
 export function buildInitialMessages(
   selection: string,
   question: string,
-  extra: { nearby?: string; fullText?: string; title?: string } = {},
+  extra: {
+    nearby?: string;
+    fullText?: string;
+    title?: string;
+    annotations?: string;
+    notes?: string[];
+    supportingInfo?: Array<{ name: string; text: string }>;
+    /** Crop images of the selection, for formulas the text layer mangles. */
+    images?: ImageAttachment[];
+  } = {},
 ): ChatMessage[] {
+  const text = buildUserMessage({ selection, question, ...extra });
+
+  // Images are only allowed in `user` messages, and a plain string keeps the
+  // order cache-friendly when there is nothing to attach.
+  const images = extra.images ?? [];
+  if (!images.length) {
+    return [
+      { role: "system", content: buildSystemPrompt() },
+      { role: "user", content: text },
+    ];
+  }
+
+  const parts: ContentPart[] = [
+    { type: "text", text },
+    ...images.map(
+      (img): ContentPart => ({
+        type: "image_url",
+        image_url: {
+          url: img.dataUrl,
+          // `original` keeps the pixels; the default already behaves this way,
+          // but stating it protects against a silent quality loss if the
+          // provider changes its default. Tiles stay inside the pixel budget
+          // so this never costs more than the flat per-image maximum.
+          detail: "original",
+        },
+      }),
+    ),
+  ];
+
   return [
     { role: "system", content: buildSystemPrompt() },
-    { role: "user", content: buildUserMessage({ selection, question, ...extra }) },
+    { role: "user", content: parts },
   ];
 }
 

@@ -936,8 +936,151 @@ export function describeGeometry(selection: Selection | null): GeometryReport {
   }
 }
 
+/* ------------------------------------------------------------------ */
+/* Tiling                                                              */
+/* ------------------------------------------------------------------ */
+
 /**
- * Approximate decoded size of a base64 PNG, in bytes./**
+ * Pixel budget for one image, matching the provider's resampling target.
+ *
+ * The API resizes every image so its total pixel count is roughly that of a
+ * 1300x1300 image, and bills a flat maximum of 1024 tokens per image regardless
+ * of the original size. Anything above this budget is therefore downscaled —
+ * which is what blurs a formula embedded in a wide selection — while anything
+ * at or below it is kept as-is.
+ */
+/**
+ * Approximate decoded size of a base64 PNG, in bytes.
+/* Tiling                                                              */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Pixel budget for one image, matching the provider's resampling target.
+ *
+ * The API resizes every image so its total pixel count is roughly that of a
+ * 1300x1300 image, and bills a flat maximum of 1024 tokens per image regardless
+ * of the original size. Anything above this budget is therefore downscaled —
+ * which is what blurs a formula embedded in a wide selection — while anything
+ * at or below it is kept as-is.
+ */
+export const TILE_PIXEL_BUDGET = 1300 * 1300;
+
+/**
+ * Hard cap on one side of an image, from the provider's limits.
+ *
+ * Exceeding it is a request error rather than a quality loss, so it is enforced
+ * separately from the pixel budget — a wide selection can be well under the
+ * pixel budget and still be too wide once scaled.
+ */
+export const MAX_IMAGE_DIMENSION = 8192;
+
+/**
+ * Plan how to cut `rect` into tiles that each stay inside the pixel budget at
+ * the given scale, in canvas coordinates.
+ *
+ * Splitting is what makes a large selection work: several tiles each keep their
+ * original resolution, whereas one wide image is resampled until small maths
+ * stops being legible. Tiles overlap slightly so a formula on a boundary is
+ * still whole in one of them.
+ */
+export function planTiles(
+  rect: Rect,
+  scale = 2,
+  budget = TILE_PIXEL_BUDGET,
+): Rect[] {
+  if (rect.width <= 0 || rect.height <= 0) {
+    return [];
+  }
+
+  // Width is never split — cutting a formula vertically would separate the two
+  // sides of an equation — so an over-wide selection is scaled down instead and
+  // only the height is divided.
+  const effectiveScale = effectiveTileScale(rect, scale, budget);
+
+  // Tallest tile, in *source canvas pixels*, that still fits the budget once
+  // drawn at `effectiveScale`.
+  const maxHeight = Math.max(
+    1,
+    Math.floor(budget / (rect.width * effectiveScale * effectiveScale)),
+  );
+
+  if (rect.height <= maxHeight) {
+    return [rect];
+  }
+
+  // Overlap so a formula sitting on a boundary is whole in one of the tiles.
+  // The last tile is shifted back onto the end rather than being a sliver.
+  const overlap = Math.min(24, Math.floor(maxHeight * 0.1));
+  const step = Math.max(1, maxHeight - overlap);
+
+  const tiles: Rect[] = [];
+  for (let top = 0; top < rect.height; top += step) {
+    const height = Math.min(maxHeight, rect.height - top);
+    tiles.push({
+      left: rect.left,
+      top: rect.top + top,
+      width: rect.width,
+      height,
+    });
+    if (top + height >= rect.height) {
+      break;
+    }
+  }
+  return tiles;
+}
+
+/** The scale `planTiles` will settle on for this rectangle. */
+export function effectiveTileScale(
+  rect: Rect,
+  scale = 2,
+  budget = TILE_PIXEL_BUDGET,
+): number {
+  if (rect.width <= 0 || rect.height <= 0) {
+    return scale;
+  }
+  // Two constraints with different natures:
+  //
+  //  - the pixel budget is about quality — exceeding it only means the image
+  //    gets resampled, so it is expressed as a factor that may exceed 1 (in
+  //    which case there is nothing to do);
+  //  - the per-side limit is a hard error — exceeding it fails the request, so
+  //    it caps the *result* rather than scaling a factor.
+  const byBudget = Math.sqrt(budget / (rect.width * rect.height));
+  const target = scale * Math.min(1, byBudget);
+  // bySide is already an absolute scale (limit / source pixels), so it caps the
+  // result directly rather than multiplying the requested scale.
+  const bySide = MAX_IMAGE_DIMENSION / Math.max(rect.width, rect.height);
+  return Math.max(0.05, Math.min(target, bySide, scale));
+}
+
+/** How many tiles a capture needs. */
+export function tileCount(rect: Rect, scale = 2): number {
+  return planTiles(rect, scale).length;
+}
+
+/** Render every tile of a capture. */
+export function renderCaptureTiles(
+  pending: PendingCapture,
+  scale = 2,
+): CropResult[] {
+  const rect = pending.rect;
+  const effective = effectiveTileScale(rect, scale);
+  const out: CropResult[] = [];
+  for (const tile of planTiles(rect, scale)) {
+    const crop = cropCanvas(pending.canvas, tile, effective);
+    if (crop) {
+      out.push(crop);
+    }
+  }
+  return out;
+}
+
+/** Estimated token cost: the provider bills a flat maximum per image. */
+export function estimateImageTokens(imageCount: number): number {
+  return imageCount * 1024;
+}
+
+/**
  * Approximate decoded size of a base64 PNG, in bytes.
  *
  * Used to stay under the provider's per-image limit before sending.
