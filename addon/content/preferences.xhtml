@@ -314,6 +314,26 @@
       </div>
     </fieldset>
 
+    <details class="advanced" open="open">
+      <summary>公式截图</summary>
+      <div class="field">
+        <div class="check">
+          <input id="sendScreenshot" type="checkbox" />
+          <label for="sendScreenshot" style="font-weight: 400; margin: 0">
+            提问时附带选区截图
+          </label>
+        </div>
+        <div class="desc">
+          PDF 的文字层会把分式压平、上下标错位、范数竖线丢失，截图是公式唯一可靠的来源。
+          <br />
+          <b>大段选区也能用</b>：超过约 1300×1300 像素会<b>自动切成多块</b>分别发送，
+          每块都保留原分辨率，而不是被整体缩小。每块最多 1024 tokens，成本显示在状态行。
+          <br />
+          仅适用于 <code>deepseek-flash</code>（多模态）；<code>deepseek-v4-pro</code> 不接受图片。
+        </div>
+      </div>
+    </details>
+
     <details class="advanced">
       <summary>调试</summary>
       <div class="field">
