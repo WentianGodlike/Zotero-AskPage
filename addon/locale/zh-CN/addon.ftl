@@ -1,6 +1,6 @@
-highlightask-name = Highlight Ask
+highlightask-name = AskPage
 
 pane-header =
     .label = AI 助手
 pane-sidenav =
-    .tooltiptext = Highlight Ask
+    .tooltiptext = AskPage

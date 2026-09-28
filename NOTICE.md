@@ -1,6 +1,6 @@
 # NOTICE — 来源与许可
 
-本插件（Highlight Ask）建立在 [zotero-plugin-template](https://github.com/windingwind/zotero-plugin-template)
+本插件（AskPage）建立在 [zotero-plugin-template](https://github.com/windingwind/zotero-plugin-template)
 之上，并使用了若干第三方依赖。此文件说明各部分来源，以便遵守各自的许可条款。
 
 ## 1. 来自 zotero-plugin-template 的文件

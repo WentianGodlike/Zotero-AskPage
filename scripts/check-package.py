@@ -8,7 +8,7 @@ or referenced by runtime code but never emitted — passes those checks and fail
 at runtime with only a console error, e.g.
 
     Error opening input stream (invalid filename?):
-      .../highlight-ask@yangruiyu.dev.xpi!/content/providers.data.js
+      .../<addonID>.xpi!/content/providers.data.js
 
 which leaves the settings pane silently blank.
 
@@ -24,8 +24,33 @@ import re
 import sys
 import zipfile
 
+def _find_built_xpi() -> str:
+    """Locate the packed artefact.
+
+    Found by scanning rather than by deriving the name from package.json: the
+    scaffold normalises `zotero-askpage` to `ask-page.xpi`, and re-implementing
+    that rule here would break again the next time either side changes.
+    """
+    import glob
+    from pathlib import Path
+
+    build = Path(__file__).resolve().parent.parent / ".scaffold" / "build"
+    found = sorted(glob.glob(str(build / "*.xpi")))
+    if not found:
+        # Fall back to a name that at least points at the expected location, so
+        # the error message is useful.
+        return str(build / "plugin.xpi")
+    return found[0]
+
+
 DEFAULT_XPI = os.path.join(
-    os.path.dirname(os.path.abspath(__file__)), "..", ".scaffold", "build", "highlight-ask.xpi"
+    os.path.dirname(os.path.abspath(__file__)),
+    "..",
+    ".scaffold",
+    "build",
+    # Located by scanning: a hard-coded literal here broke the build after the
+    # project was renamed.
+    _find_built_xpi(),
 )
 SRC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "src")
 
