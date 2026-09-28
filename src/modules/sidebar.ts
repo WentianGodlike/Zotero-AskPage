@@ -27,6 +27,18 @@ function pluginConfig() {
   return addon.data.config;
 }
 
+/**
+ * Resolve a Fluent message id for this addon.
+ *
+ * `l10nID` must be the FULL message id including the addon's namespace prefix —
+ * the scaffold rewrites `addon.ftl` keys to `<addonRef>-<key>`. Passing a bare
+ * key does not throw; Zotero simply falls back to displaying the raw id as the
+ * label, which is why this is easy to get wrong quietly.
+ */
+function sectionL10nID(key: string): string {
+  return `${pluginConfig().addonRef}-${key}`;
+}
+
 /** The chat view for the currently shown reader tab. */
 let activeView: ChatView | null = null;
 /** Item id the active view belongs to. */
@@ -49,11 +61,11 @@ export function registerReaderSidebar(): void {
       paneID: PANE_ID,
       pluginID: pluginConfig().addonID,
       header: {
-        l10nID: "highlight-ask-pane-header",
+        l10nID: sectionL10nID("pane-header"),
         icon: `chrome://${pluginConfig().addonRef}/content/icons/favicon.png`,
       },
       sidenav: {
-        l10nID: "highlight-ask-pane-sidenav",
+        l10nID: sectionL10nID("pane-sidenav"),
         icon: `chrome://${pluginConfig().addonRef}/content/icons/favicon.png`,
       },
 

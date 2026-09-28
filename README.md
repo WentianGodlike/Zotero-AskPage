@@ -258,7 +258,10 @@ addon/
   content/preferences.*  设置界面
   prefs.js               默认配置
 scripts/
-  check-manifest.py      构建后校验 manifest（防安装失败）
+  check-manifest.py      校验 manifest（防安装失败）
+  check-pane.py          按 Zotero 的方式解析设置页标记
+  check-package.py       校验 XPI 内容完整性（引用与归档是否一致）
+  diagnose-pane.mjs      对真实产物做端到端诊断，不用装进 Zotero
   make-icons.py          按声明尺寸生成图标
 test/local.test.ts       纯逻辑单测
 ```
@@ -318,6 +321,29 @@ PDF 文本层不是给人用的。`normalizeSelection()` 处理三类噪声：
 
 公式在**行内解析之前**就被抽出来存成占位符，否则 `$a_i * b_j$` 里的
 `_` 和 `*` 会被当成斜体/粗体标记啃掉。
+
+## 构建期校验
+
+`npm run build` 会依次跑四项检查，任何一项失败都会中断：
+
+| 脚本 | 检查对象 | 防的是什么 |
+| --- | --- | --- |
+| `tsc --noEmit` | 源码 | 类型错误 |
+| `check-manifest.py` | 构建目录的 manifest | `update_url` 为空等导致 Zotero 报「可能无法兼容」 |
+| `check-pane.py` | 设置页标记 | 按 **Zotero 的包装方式**解析；XML 声明、id 对不上 |
+| `check-package.py` | **打好的 XPI** | 代码引用了但没打进包的文件；Fluent 消息 id 是否真能解析 |
+
+前三项看的是**构建目录**，最后一项看的是**真正会被加载的 XPI**。这个区别很关键：
+只要「构建目录里有、包里没有」，前三项全过，运行时才炸——而且只留一行控制台错误。
+
+### 两个踩过的坑（都已固化为校验）
+
+1. **`providers.data.js` 没进包**。设置页加载它失败 → 整页空白。
+   原因是我只验证了构建目录，没验证归档。现在由 `check-package.py` 覆盖。
+2. **`l10nID` 必须写完整消息 id**。脚手架会把 `addon.ftl` 的键改写成
+   `<addonRef>-<key>`，所以 Zotero 侧要传 `highlightask-pane-header` 而不是
+   `pane-header`。**传错不报错**——界面只会把原始 id 当文字显示出来。
+   现在由 `check-package.py` 交叉核对源码里的 `l10nID` 与包内 `.ftl`。
 
 ## 已知限制
 

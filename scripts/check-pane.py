@@ -24,6 +24,10 @@ Two consequences, both of which have bitten this project:
 Validating the file standalone would pass in exactly the case that fails in
 Zotero, so this script always wraps first.
 
+Note: l10n strings are checked in scripts/check-package.py, against the built
+archive, because Fluent message ids are namespaced by the scaffold and only the
+packaged .ftl files show the real ids.
+
 Run: python3 scripts/check-pane.py [path/to/preferences.xhtml]
 Exit code 1 on any problem.
 """
@@ -124,10 +128,6 @@ def main() -> int:
             "typo only shows up as a console error"
         )
 
-    # --- 5. l10n strings referenced from src/ -----------------------------
-    root = os.path.normpath(os.path.join(os.path.dirname(path), "..", ".."))
-    errors.extend(check_l10n_strings(root))
-
     for w in warnings:
         print(f"WARN: {w}")
     for e in errors:
@@ -139,48 +139,6 @@ def main() -> int:
 
     print(f"\nOK — pane markup is valid ({len(warnings)} warning(s))")
     return 0
-
-
-def check_l10n_strings(root: str) -> list[str]:
-    """Every l10nID used in the source must exist in the Fluent files.
-
-    A missing string does not throw — the UI just shows the raw id — so it is
-    easy to ship by accident.
-    """
-    problems: list[str] = []
-    src_dir = os.path.join(root, "src")
-    locale_dir = os.path.join(root, "addon", "locale")
-
-    used: set[str] = set()
-    for dirpath, _dirnames, filenames in os.walk(src_dir):
-        for name in filenames:
-            if not name.endswith((".ts", ".tsx")):
-                continue
-            text = open(os.path.join(dirpath, name), encoding="utf-8").read()
-            used |= set(re.findall(r'l10nID:\s*"([^"]+)"', text))
-            used |= set(re.findall(r'l10n:\s*\{\s*id:\s*"([^"]+)"', text))
-
-    if not used:
-        return problems
-
-    defined: set[str] = set()
-    if os.path.isdir(locale_dir):
-        for dirpath, _dirnames, filenames in os.walk(locale_dir):
-            for name in filenames:
-                if not name.endswith(".ftl"):
-                    continue
-                text = open(os.path.join(dirpath, name), encoding="utf-8").read()
-                defined |= set(re.findall(r"^([A-Za-z0-9_-]+)\s*=", text, re.M))
-
-    missing = sorted(used - defined)
-    if missing:
-        problems.append(
-            "l10nID(s) used in src/ but not defined in any .ftl: "
-            + ", ".join(missing)
-        )
-    else:
-        print(f"all {len(used)} l10nID(s) used in src/ are defined")
-    return problems
 
 
 if __name__ == "__main__":
