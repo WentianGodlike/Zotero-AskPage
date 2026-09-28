@@ -355,8 +355,29 @@ export function buildInitialMessages(
 export function buildFollowUpMessages(
   history: ChatMessage[],
   question: string,
+  images: ImageAttachment[] = [],
 ): ChatMessage[] {
-  return [...history, { role: "user", content: question }];
+  if (!images.length) {
+    return [...history, { role: "user", content: question }];
+  }
+  // A screenshot of the newly selected passage. Follow-ups are usually about a
+  // *different* formula, so omitting images here made screenshots work only for
+  // the first question of a session.
+  return [
+    ...history,
+    {
+      role: "user",
+      content: [
+        { type: "text", text: question },
+        ...images.map(
+          (img): ContentPart => ({
+            type: "image_url",
+            image_url: { url: img.dataUrl, detail: "original" },
+          }),
+        ),
+      ],
+    },
+  ];
 }
 
 /* ------------------------------------------------------------------ */
