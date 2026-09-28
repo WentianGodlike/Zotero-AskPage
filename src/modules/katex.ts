@@ -180,6 +180,8 @@ function tokenise(html: string): Token[] {
     const selfClosing = inner.endsWith("/");
     const body = selfClosing ? inner.slice(0, -1) : inner;
     const space = body.search(/\s/);
+    // Tag names can be lower-cased: every tag KaTeX emits is already lower-case,
+    // in both the HTML and the SVG namespace. Attribute names cannot — see below.
     const tag = (space < 0 ? body : body.slice(0, space)).trim().toLowerCase();
     const attrText = space < 0 ? "" : body.slice(space);
 
@@ -188,7 +190,11 @@ function tokenise(html: string): Token[] {
       /([a-zA-Z_:][-a-zA-Z0-9_:.]*)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))/g;
     let m: RegExpExecArray | null;
     while ((m = attrRe.exec(attrText)) !== null) {
-      attrs[m[1].toLowerCase()] = decodeEntities(m[2] ?? m[3] ?? m[4] ?? "");
+      // Attribute names keep their original case. Lower-casing is harmless in
+      // HTML but fatal in SVG, which is case-sensitive: `viewBox` silently
+      // becomes an unknown attribute called `viewbox`, the coordinate system
+      // is lost, and the path draws nothing at all.
+      attrs[m[1]] = decodeEntities(m[2] ?? m[3] ?? m[4] ?? "");
     }
 
     tokens.push({ kind: "open", tag, attrs });
