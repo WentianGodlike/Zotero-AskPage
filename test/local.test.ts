@@ -42,6 +42,7 @@ import {
   isUsableRect,
   unionRects,
   dataUrlBytes,
+  looksLikeFormulaSelection,
 } from "../src/modules/screenshot";
 import {
   htmlToText,
@@ -1107,6 +1108,65 @@ test("a throwing Zotero.Items.get degrades to no match", () => {
   } finally {
     (globalThis as any).Zotero.Items.get = original;
   }
+});
+
+console.log("\nlooksLikeFormulaSelection");
+// Cases below are the real strings from a saved session, not invented ones.
+test("accepts a single extracted formula", () => {
+  // Verbatim from the text layer of Understanding Deep Learning, eq. 9.11.
+  const text = "P r(φ|{xi, yi}) = ∏I i=1 P r(yi|xi, φ)P r(φ) ∫ ∏I i=1 P r(yi|xi, φ)P r(φ)dφ ,";
+  assert.equal(
+    looksLikeFormulaSelection(text, { width: 992, height: 120 }),
+    true,
+  );
+});
+
+test("accepts a short equation with a norm", () => {
+  const text = "L̃GD [ϕ] = L[ϕ] + α ∂L 4 ∂ϕ 2 .";
+  assert.equal(looksLikeFormulaSelection(text, { width: 700, height: 110 }), true);
+});
+
+test("rejects the long prose selection that contained formulas", () => {
+  // Also verbatim: the 1127-character selection from the same session, which
+  // is exactly the case a screenshot would ruin — downscaled until the
+  // embedded formulas are unreadable.
+  const text =
+    "The maximum likelihood approach is generally overconfident; it selects the most likely " +
+    "parameters during training and uses these to make predictions. However, many parameter " +
+    "values may be broadly compatible with the data and only slightly less likely. The Bayesian " +
+    "approach treats the parameters as unknown variables, and computes a distribution over these " +
+    "parameters conditioned on the training data using Bayes rule:";
+  assert.equal(
+    looksLikeFormulaSelection(text, { width: 1782, height: 348 }),
+    false,
+  );
+});
+
+test("rejects plain prose", () => {
+  assert.equal(
+    looksLikeFormulaSelection(
+      "This is effectively an infinite weighted ensemble, where the weight depends on the prior.",
+      { width: 900, height: 60 },
+    ),
+    false,
+  );
+});
+
+test("rejects a symbol-dense but multi-line block", () => {
+  // Symbol ratio is high, but it spans many lines: not a single formula.
+  const text = "a = b + c\nd = e - f\ng = h * i\nj = k / l";
+  assert.equal(looksLikeFormulaSelection(text, { width: 300, height: 400 }), false);
+});
+
+test("rejects empty text", () => {
+  assert.equal(looksLikeFormulaSelection("", { width: 100, height: 20 }), false);
+  assert.equal(looksLikeFormulaSelection("   ", { width: 100, height: 20 }), false);
+});
+
+test("handles a zero-width rect without dividing by zero", () => {
+  assert.doesNotThrow(() =>
+    looksLikeFormulaSelection("x = y", { width: 0, height: 10 }),
+  );
 });
 
 console.log("\nfindAnySelection");
