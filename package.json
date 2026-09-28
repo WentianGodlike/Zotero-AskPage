@@ -1,7 +1,7 @@
 {
   "name": "zotero-highlight-ask",
   "type": "module",
-  "version": "0.5.3",
+  "version": "0.6.0",
   "description": "Highlight text in Zotero PDF reader and ask DeepSeek to explain it.",
   "config": {
     "addonName": "Highlight Ask",
@@ -38,6 +38,7 @@
     "check:sandbox": "python3 scripts/check-sandbox-globals.py"
   },
   "dependencies": {
+    "katex": "^0.18.9",
     "zotero-plugin-toolkit": "^5.1.0-beta.13"
   },
   "devDependencies": {
@@ -51,7 +52,8 @@
     "prettier": "^3.7.4",
     "typescript": "^5.9.3",
     "zotero-plugin-scaffold": "^0.8.2",
-    "zotero-types": "^4.1.0-beta.4"
+    "zotero-types": "^4.1.0-beta.4",
+    "@types/katex": "^0.16.8"
   },
   "prettier": {
     "printWidth": 80,

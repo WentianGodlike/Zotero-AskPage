@@ -28,7 +28,18 @@ AGPL-3.0-or-later**（见 `LICENSE`）。
 
 | 组件 | 许可 | 用途 |
 | --- | --- | --- |
+| [KaTeX](https://katex.org/) | **MIT** | 数学排版。库被 bundle 进 `content/scripts/highlightask.js`，样式表输出为 `content/katex.css`。**不打包字体**——复用 Zotero 笔记编辑器自带的那套（见下）。MIT 与 AGPL-3.0 兼容。 |
 | [zotero-plugin-toolkit](https://github.com/windingwind/zotero-plugin-toolkit) | **MIT** | 被 bundle 进 `content/scripts/highlightask.js`。MIT 与 AGPL-3.0 兼容。 |
+
+### 关于 KaTeX 字体的复用
+
+Zotero 为笔记编辑器自带了 KaTeX 的 20 个 woff2 字体
+（`resource://zotero/note-editor/assets/fonts/`）。插件在运行时把
+`katex.css` 里 `@font-face` 的相对路径改写到该目录，因此**不随包分发字体**，
+XPI 因此小了约 1.2 MB。字形与 Zotero 其余部分保持一致。
+
+若该目录在将来的 Zotero 版本中变动，公式的**字符仍会正确显示**（文本层是
+真实字符），只是字形回退到系统字体。
 
 构建工具链（esbuild、TypeScript、zotero-plugin-scaffold、zotero-types 等）
 仅用于开发，不随插件分发。
