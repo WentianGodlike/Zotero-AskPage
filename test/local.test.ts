@@ -1195,6 +1195,31 @@ test("only the norm bars use SVG; other delimiters use font glyphs", () => {
   }
 });
 
+test("SVG attribute names keep their case", () => {
+  // `viewBox` lower-cased to `viewbox` is an unknown attribute, so the SVG
+  // loses its coordinate system and draws nothing — the norm bars vanished
+  // while the rest of the formula rendered perfectly. HTML ignores attribute
+  // case; SVG does not.
+  const made = buildWithRecorder(
+    "\\left\\| \\frac{\\partial L}{\\partial \\phi} \\right\\|^2",
+  );
+  const svgs = made.filter((e) => e.tag === "svg");
+  assert.ok(svgs.length > 0, "expected SVG delimiters");
+  for (const svg of svgs) {
+    assert.ok(
+      "viewBox" in svg.attrs,
+      `viewBox missing (got ${Object.keys(svg.attrs).join(",")})`,
+    );
+    assert.ok(!("viewbox" in svg.attrs), "viewBox must not be lower-cased");
+  }
+});
+
+test("ordinary HTML attributes are unaffected by case handling", () => {
+  const made = buildWithRecorder("\\frac{a}{b}");
+  const withClass = made.filter((e) => e.attrs.class !== undefined);
+  assert.ok(withClass.length > 0, "class attributes should survive");
+});
+
 test("plain formulas create no SVG at all", () => {
   const made = buildWithRecorder("x^2 + y_i");
   assert.equal(made.filter((e) => e.tag === "svg").length, 0);
