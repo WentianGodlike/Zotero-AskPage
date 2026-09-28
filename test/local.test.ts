@@ -149,7 +149,10 @@ function makeTurn(
 }
 
 // NOTE_HEADING is not exported; keep the literal in sync with notes.ts.
-const NOTE_HEADING = "Highlight Ask 会话";
+const NOTE_HEADING = "AskPage 会话";
+// The previous heading must still be recognised, or every conversation
+// archived before the rename becomes unreachable.
+const LEGACY_NOTE_HEADING = "Highlight Ask 会话";
 
 /* ---------------------------------------------------------------- */
 /* A minimal DOM good enough for renderMarkdown                      */
@@ -1060,6 +1063,18 @@ test("renderSessionHtml numbers turns in order", () => {
   const html = renderSessionHtml(s);
   assert.ok(html.indexOf("1. first") < html.indexOf("2. second"));
   assert.ok(html.includes(NOTE_HEADING));
+  // A note written before the rename is still the reader's conversation.
+  assert.ok(
+    renderSessionHtml({
+      id: "s",
+      itemID: 1,
+      title: "t",
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+      turns: [{ question: "q", answer: "a", ts: "2026-01-01T00:00:00.000Z" }],
+    } as any).includes(NOTE_HEADING),
+    "new sessions use the current heading",
+  );
 });
 
 /* ---------------------------------------------------------------- */

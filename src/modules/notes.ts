@@ -40,7 +40,24 @@ export interface Session {
   noteItemID?: number;
 }
 
-const NOTE_HEADING = "Highlight Ask 会话";
+const NOTE_HEADING = "AskPage 会话";
+
+/**
+ * Headings this plugin has used before.
+ *
+ * The note heading is renamed along with the project, but notes written under
+ * the old name are still the reader's conversations. Matching only the current
+ * heading would orphan every session archived before the rename.
+ */
+const LEGACY_NOTE_HEADINGS = ["Highlight Ask 会话"];
+
+/** True when a note was written by this plugin, under any of its names. */
+function isOwnHeading(html: string): boolean {
+  return (
+    html.includes(NOTE_HEADING) ||
+    LEGACY_NOTE_HEADINGS.some((heading) => html.includes(heading))
+  );
+}
 
 /** Stable-ish, readable, and unique enough for one library. */
 export function makeSessionId(itemID: number, at = new Date()): string {
@@ -195,7 +212,7 @@ export async function findSessionNote(
     for (const id of noteIDs) {
       const note = await Zotero.Items.getAsync(id);
       const html: string = note?.getNote?.() || "";
-      if (html.includes(NOTE_HEADING)) {
+      if (isOwnHeading(html)) {
         return note;
       }
     }
@@ -207,7 +224,7 @@ export async function findSessionNote(
       for (const id of att?.getNotes?.() || []) {
         const note = await Zotero.Items.getAsync(id);
         const html: string = note?.getNote?.() || "";
-        if (html.includes(NOTE_HEADING)) {
+        if (isOwnHeading(html)) {
           return note;
         }
       }
