@@ -7,6 +7,20 @@ install-time compatibility failure, so the sizes here must match
 
 Usage: python3 scripts/make-icons.py
 """
+
+from __future__ import annotations
+
+import sys
+
+if sys.version_info < (3, 8):  # noqa: UP036
+    sys.exit(
+        "This script needs Python 3.8 or newer "
+        f"(running {sys.version.split()[0]})."
+    )
+
+# Kept for the same reason as the other scripts: harmless here, and it means
+# every script in this directory can be read the same way.
+
 import os
 import struct
 import zlib
@@ -18,7 +32,6 @@ OUT_DIR = os.path.join(
 # The plugin's accent colour, matching the answer panel (#2f6feb).
 BG = (47, 111, 235)
 FG = (255, 255, 255)
-
 
 def make_png(size: int) -> bytes:
     """A simple mark: three white text bars on the accent background."""
@@ -71,7 +84,6 @@ def make_png(size: int) -> bytes:
         + chunk(b"IEND", b"")
     )
 
-
 def main():
     os.makedirs(OUT_DIR, exist_ok=True)
     # Names and sizes must match addon/manifest.json.
@@ -84,7 +96,6 @@ def main():
         with open(path, "wb") as fh:
             fh.write(make_png(size))
         print(f"wrote {path} ({size}x{size})")
-
 
 if __name__ == "__main__":
     main()

@@ -1,7 +1,7 @@
 {
   "name": "zotero-askpage",
   "type": "module",
-  "version": "0.14.0",
+  "version": "0.14.1",
   "description": "Highlight text in Zotero PDF reader and ask DeepSeek to explain it.",
   "config": {
     "addonName": "AskPage",
@@ -22,7 +22,7 @@
   "license": "AGPL-3.0-or-later",
   "scripts": {
     "start": "zotero-plugin serve",
-    "build": "python3 scripts/copy-katex-fonts.py && zotero-plugin build && tsc --noEmit && python3 scripts/check-sandbox-globals.py && python3 scripts/check-manifest.py && python3 scripts/check-pane.py && python3 scripts/check-package.py && python3 scripts/check-template-literals.py",
+    "build": "python3 scripts/copy-katex-fonts.py && zotero-plugin build && tsc --noEmit && python3 scripts/check-sandbox-globals.py && python3 scripts/check-manifest.py && python3 scripts/check-pane.py && python3 scripts/check-package.py && python3 scripts/check-template-literals.py && python3 scripts/check-cross-platform.py",
     "lint:check": "prettier --check . && eslint .",
     "lint:fix": "prettier --write . && eslint . --fix",
     "release": "zotero-plugin release",
@@ -69,5 +69,9 @@
         }
       }
     ]
+  },
+  "engines": {
+    "node": ">=22.8.0",
+    "npm": ">=10"
   }
 }
