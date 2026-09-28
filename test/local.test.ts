@@ -1239,6 +1239,172 @@ test("non-SVG elements stay in the HTML namespace", () => {
   }
 });
 
+console.log("\nrobustness: settings validation");
+// `validateSettings` promises never to throw, and it reads preferences that a
+// user can hand-edit to any type. A numeric baseUrl used to crash on `.trim()`
+// instead of being reported as invalid.
+const DRAFT = {
+  providerKey: "deepseek",
+  baseUrl: "https://api.deepseek.com",
+  model: "deepseek-flash",
+  apiKey: "sk-x",
+  temperatureText: "",
+  thinkingParamsText: "",
+};
+
+test("a valid draft passes", () => {
+  assert.equal(validateSettings(DRAFT).ok, true);
+});
+
+test("non-string fields never throw", () => {
+  const weird: Array<Record<string, unknown>> = [
+    { baseUrl: 42 },
+    { baseUrl: {} },
+    { baseUrl: null },
+    { model: [] },
+    { apiKey: true },
+    { temperatureText: {} },
+    { thinkingParamsText: 5 },
+    { providerKey: null },
+    { baseUrl: undefined, model: undefined, apiKey: undefined },
+  ];
+  for (const over of weird) {
+    assert.doesNotThrow(
+      () => validateSettings({ ...DRAFT, ...over } as any),
+      `threw for ${JSON.stringify(over)}`,
+    );
+  }
+});
+
+test("a non-string field is treated as missing and rejected", () => {
+  const result = validateSettings({ ...DRAFT, baseUrl: 42 } as any);
+  assert.equal(result.ok, false);
+  assert.ok(result.error, "should explain what is wrong");
+});
+
+test("dangerous URL schemes are refused", () => {
+  for (const baseUrl of [
+    "javascript:alert(1)",
+    "file:///etc/passwd",
+    "data:text/html,x",
+    "not a url",
+  ]) {
+    const result = validateSettings({ ...DRAFT, providerKey: "custom", baseUrl } as any);
+    assert.equal(result.ok, false, `${baseUrl} should be refused`);
+  }
+});
+
+test("a baseUrl ending in /chat/completions is refused with a hint", () => {
+  const result = validateSettings({
+    ...DRAFT,
+    baseUrl: "https://api.deepseek.com/chat/completions",
+  } as any);
+  assert.equal(result.ok, false);
+  assert.ok(/chat\/completions/.test(result.error || ""), result.error);
+});
+
+test("malformed thinking params are refused", () => {
+  assert.equal(
+    validateSettings({ ...DRAFT, thinkingParamsText: "{oops" } as any).ok,
+    false,
+  );
+  assert.equal(
+    validateSettings({ ...DRAFT, thinkingParamsText: "[1,2]" } as any).ok,
+    false,
+  );
+});
+
+test("an out-of-range temperature is refused", () => {
+  for (const temperatureText of ["hot", "999", "-3"]) {
+    assert.equal(
+      validateSettings({ ...DRAFT, temperatureText } as any).ok,
+      false,
+      `${temperatureText} should be refused`,
+    );
+  }
+});
+
+test("an empty draft is refused rather than crashing", () => {
+  assert.doesNotThrow(() => validateSettings({} as any));
+  assert.equal(validateSettings({} as any).ok, false);
+});
+
+console.log("\nrobustness: malformed context and budgets");
+// Prompt assembly receives values that cross several boundaries (Zotero, the
+// reader, user preferences). A malformed one must not throw, and must never
+// reach the model as the literal string "undefined".
+test("a non-string annotations value does not throw", () => {
+  assert.doesNotThrow(() =>
+    buildUserMessage({ selection: "x", question: "q", annotations: 999 as any }),
+  );
+});
+
+test("malformed notes entries are dropped, not stringified", () => {
+  const out = buildUserMessage({
+    selection: "x",
+    question: "q",
+    notes: [1, null, {}, "real note"] as any,
+  });
+  assert.ok(out.includes("real note"), out);
+  assert.ok(!out.includes("undefined"), out);
+  assert.ok(!out.includes("null"), out);
+});
+
+test("supporting info entries without text are skipped", () => {
+  const out = buildUserMessage({
+    selection: "x",
+    question: "q",
+    supportingInfo: [{}, { name: null, text: null }, { name: "SI.pdf", text: "body" }] as any,
+  });
+  assert.ok(out.includes("SI.pdf"), out);
+  assert.ok(out.includes("body"), out);
+});
+
+test("non-string retrieved and fullText are ignored", () => {
+  assert.doesNotThrow(() =>
+    buildUserMessage({
+      selection: "x",
+      question: "q",
+      retrieved: 5 as any,
+      fullText: [] as any,
+    }),
+  );
+});
+
+test("a null selection and question do not throw", () => {
+  assert.doesNotThrow(() =>
+    buildUserMessage({ selection: null as any, question: null as any }),
+  );
+});
+
+test("a zero or negative budget yields nothing rather than a fragment", () => {
+  // A negative budget used to return just the head slice — silently wrong
+  // content, which is worse than an empty result.
+  for (const budget of [0, -5, NaN]) {
+    const out = trimFullText("abcdef", budget);
+    assert.equal(out.text, "", `budget ${budget} should yield nothing`);
+    assert.equal(out.truncated, true);
+  }
+});
+
+test("an infinite budget means no limit", () => {
+  const out = trimFullText("abcdef", Infinity);
+  assert.equal(out.text, "abcdef");
+  assert.equal(out.truncated, false);
+});
+
+test("a tiny budget never emits a NaN in the omission marker", () => {
+  for (const budget of [1, 10, 30, 63]) {
+    const out = trimFullText("x".repeat(500), budget);
+    assert.ok(!/NaN|undefined/.test(out.text), `budget ${budget}: ${out.text}`);
+  }
+});
+
+test("non-string text is treated as empty", () => {
+  assert.equal(trimFullText(null as any, 100).text, "");
+  assert.equal(trimFullText(undefined as any, 100).text, "");
+});
+
 console.log("\nretrieval: chunking");
 test("short text stays one chunk", () => {
   const chunks = chunkText("hello world");

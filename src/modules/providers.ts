@@ -58,11 +58,17 @@ export function validateSettings(draft: SettingsDraft): SettingsValidation {
   const warnings: string[] = [];
   const provider = getProvider(draft.providerKey);
 
-  const baseUrl = (draft.baseUrl || "").trim().replace(/\/+$/, "");
-  const model = (draft.model || "").trim();
-  const apiKey = (draft.apiKey || "").trim();
-  const temperatureText = (draft.temperatureText || "").trim();
-  const thinkingParamsText = (draft.thinkingParamsText || "").trim();
+  // Every field is coerced defensively. This function promises never to throw,
+  // and it reads preferences that can be hand-edited to any type — a numeric
+  // `baseUrl` used to crash on `.trim()` instead of being reported as invalid.
+  const text = (value: unknown): string =>
+    typeof value === "string" ? value.trim() : "";
+
+  const baseUrl = text(draft.baseUrl).replace(/\/+$/, "");
+  const model = text(draft.model);
+  const apiKey = text(draft.apiKey);
+  const temperatureText = text(draft.temperatureText);
+  const thinkingParamsText = text(draft.thinkingParamsText);
 
   if (!baseUrl) {
     return { ok: false, error: "API 地址不能为空", warnings };
