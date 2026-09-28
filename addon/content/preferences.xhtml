@@ -315,6 +315,23 @@
     </fieldset>
 
     <details class="advanced">
+      <summary>调试</summary>
+      <div class="field">
+        <div class="check">
+          <input id="debugScreenshot" type="checkbox" />
+          <label for="debugScreenshot" style="font-weight: 400; margin: 0">
+            在面板上显示「截图预览」按钮
+          </label>
+        </div>
+        <div class="desc">
+          点一下会把当前选中区域从 PDF 画布裁成 PNG，存到数据目录的
+          <code>highlight-ask/debug/</code> 下，并在调试输出里打印几何信息。
+          用来核对截图区域是否正确——裁剪位置算错时，看起来会像是模型的问题。
+        </div>
+      </div>
+    </details>
+
+    <details class="advanced">
       <summary>高级：请求参数（JSON）</summary>
       <div class="field">
         <label for="thinkingParams">附加到请求体的字段</label>

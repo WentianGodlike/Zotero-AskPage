@@ -410,6 +410,7 @@
     $("saveToNote").checked = Boolean(readPref("saveToNote", true));
     $("saveToJson").checked = Boolean(readPref("saveToJson", true));
     $("logRequests").checked = Boolean(readPref("logRequests", true));
+    $("debugScreenshot").checked = Boolean(readPref("debugScreenshot", true));
     renderPromptFields();
     paintDataDir();
 
@@ -493,6 +494,7 @@
     writePref("saveToNote", $("saveToNote").checked);
     writePref("saveToJson", $("saveToJson").checked);
     writePref("logRequests", $("logRequests").checked);
+    writePref("debugScreenshot", $("debugScreenshot").checked);
 
     var maxChars = Number($("fullTextMaxChars").value.trim());
     if (!isFinite(maxChars) || maxChars < 1000) {
