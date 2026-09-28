@@ -375,24 +375,67 @@ export interface PendingCapture {
  * Resolve the crop region for a selection, without rendering it.
  * Returns null when the page canvas or a usable rectangle cannot be found.
  */
+export interface GeometryFailure {
+  ok: false;
+  step: "selection" | "textLayer" | "canvas" | "layerBox" | "rects" | "clamp";
+  detail: string;
+}
+export type GeometryOutcome =
+  | ({ ok: true } & PendingCapture)
+  | GeometryFailure;
+
+/**
+ * Resolve the crop region for a selection, without rendering it.
+ *
+ * Reports which step failed rather than returning a bare null: this runs inside
+ * the reader's popup handler where a failure is otherwise invisible, and
+ * "capture did not work" says nothing about whether the text layer, the page
+ * canvas or the selection rectangle was the problem.
+ */
 export function captureGeometry(
   selection: Selection | null,
   opts: { padding?: number } = {},
-): PendingCapture | null {
+): GeometryOutcome {
   try {
     if (!selection || !selection.rangeCount) {
-      return null;
+      return { ok: false, step: "selection", detail: "选区为空" };
     }
     const range = selection.getRangeAt(0);
-    const textLayer = findTextLayer(range.startContainer);
-    const canvas = findPageCanvas(range.startContainer);
-    if (!textLayer || !canvas) {
-      return null;
+    const startEl = range.startContainer;
+    const textLayer = findTextLayer(startEl);
+    const canvas = findPageCanvas(startEl);
+
+    const doc = (startEl as any)?.ownerDocument;
+    const docCanvases = (() => {
+      try {
+        return doc ? doc.querySelectorAll("canvas").length : -1;
+      } catch {
+        return -1;
+      }
+    })();
+
+    if (!textLayer) {
+      return {
+        ok: false,
+        step: "textLayer",
+        detail: `找到画布=${canvas ? "是" : "否"} 文档内canvas数=${docCanvases} 起点=${(startEl as any)?.nodeName || "?"}`,
+      };
+    }
+    if (!canvas) {
+      return {
+        ok: false,
+        step: "canvas",
+        detail: `有textLayer 文档内canvas数=${docCanvases}`,
+      };
     }
 
     const layerBox = textLayer.getBoundingClientRect();
     if (layerBox.width <= 0 || layerBox.height <= 0) {
-      return null;
+      return {
+        ok: false,
+        step: "layerBox",
+        detail: `textLayer尺寸=${Math.round(layerBox.width)}x${Math.round(layerBox.height)}`,
+      };
     }
 
     const lineRects: DOMRect[] = [];
@@ -405,7 +448,11 @@ export function captureGeometry(
       }
     }
     if (!lineRects.length) {
-      return null;
+      return {
+        ok: false,
+        step: "rects",
+        detail: `getClientRects 共 ${count} 个，均过小`,
+      };
     }
 
     const sx = canvas.width / layerBox.width;
@@ -431,23 +478,30 @@ export function captureGeometry(
     }
 
     const union = unionRects(parts);
-    if (!union) {
-      return null;
-    }
-    const rect = clampRect(union, canvas.width, canvas.height);
+    const rect = union
+      ? clampRect(union, canvas.width, canvas.height)
+      : { left: 0, top: 0, width: 0, height: 0 };
     if (!isUsableRect(rect)) {
-      return null;
+      return {
+        ok: false,
+        step: "clamp",
+        detail: `裁剪矩形=${Math.round(rect.width)}x${Math.round(rect.height)} 画布=${canvas.width}x${canvas.height}`,
+      };
     }
 
     return {
+      ok: true,
       canvas,
       rect,
-      detail: `canvas=${canvas.width}x${canvas.height} rect=${rect.left},${rect.top} ${rect.width}x${rect.height}`,
+      detail: `canvas=${canvas.width}x${canvas.height} rect=${rect.left},${rect.top} ${rect.width}x${rect.height} scale=${sx.toFixed(2)}`,
       text: String(selection.toString() || ""),
     };
   } catch (e) {
-    Zotero.debug(`[Highlight Ask] geometry failed: ${(e as Error)?.message || e}`);
-    return null;
+    return {
+      ok: false,
+      step: "selection",
+      detail: `异常: ${(e as Error)?.message || e}`,
+    };
   }
 }
 
@@ -706,27 +760,48 @@ export function dataUrlBytes(dataUrl: string): number {
  * newest is always the relevant one. Keyed by item id so a change of paper
  * cannot reuse a stale region.
  */
-let pendingCapture: { itemID?: number; pending: PendingCapture } | null = null;
+let pendingCapture:
+  | { itemID?: number; outcome: GeometryOutcome; at: number }
+  | null = null;
 
 export function stashPendingCapture(
-  pending: PendingCapture,
+  outcome: GeometryOutcome,
   itemID?: number,
 ): void {
-  pendingCapture = { itemID, pending };
-  Zotero.debug(`[Highlight Ask] capture stashed: ${pending.detail}`);
+  pendingCapture = { itemID, outcome, at: Date.now() };
+  Zotero.debug(
+    `[Highlight Ask] capture stashed: ${
+      outcome.ok ? outcome.detail : `FAILED at ${outcome.step}: ${outcome.detail}`
+    }`,
+  );
 }
 
-/** Retrieve a stash for this item, or the newest one when no id is given. */
-export function takePendingCapture(itemID?: number): PendingCapture | null {
+/**
+ * Retrieve the stashed outcome for this item.
+ *
+ * Returns the failure too, not just successes: the panel needs to say *why*
+ * nothing was captured, and this is the only place that knows.
+ */
+export function takePendingOutcome(itemID?: number): GeometryOutcome | null {
   if (!pendingCapture) {
     return null;
   }
-  if (itemID !== undefined && pendingCapture.itemID !== undefined && pendingCapture.itemID !== itemID) {
+  if (
+    itemID !== undefined &&
+    pendingCapture.itemID !== undefined &&
+    pendingCapture.itemID !== itemID
+  ) {
     return null;
   }
-  const { pending } = pendingCapture;
+  const { outcome } = pendingCapture;
   pendingCapture = null;
-  return pending;
+  return outcome;
+}
+
+/** Retrieve a stashed capture, or null if the stash holds a failure. */
+export function takePendingCapture(itemID?: number): PendingCapture | null {
+  const outcome = takePendingOutcome(itemID);
+  return outcome && outcome.ok ? outcome : null;
 }
 
 export function hasPendingCapture(): boolean {

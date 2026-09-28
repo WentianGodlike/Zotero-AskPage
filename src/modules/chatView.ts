@@ -13,6 +13,7 @@ import {
   describeGeometry,
   locateSelection,
   renderPendingCapture,
+  takePendingOutcome,
   takePendingCapture,
 } from "./screenshot";
 import { ensureDir, pluginRootDir } from "./storage";
@@ -722,20 +723,29 @@ export function createChatView(options: ChatViewOptions): ChatView {
       // i.e. when the reader's selection popup rendered. Clicking into the
       // sidebar clears the PDF selection, so a live lookup here finds nothing —
       // which is exactly why the first attempts failed.
-      const stashed = takePendingCapture();
-      if (stashed) {
-        const shot = renderPendingCapture(stashed);
-        if (shot) {
-          const path = await saveShot(shot.dataUrl);
-          flash(shotBtn, `${shot.width}×${shot.height}`);
+      // The stash is the whole story: it either holds a resolved region or the
+      // reason one could not be resolved.
+      const outcome = takePendingOutcome();
+      if (outcome) {
+        if (!outcome.ok) {
           showHint(
-            `已保存 ${shot.width}×${shot.height} 到：${path ?? "（未能写盘）"}\n${stashed.detail}`,
-            path ? "ok" : "warn",
+            `截图失败于「${labelForStep(outcome.step)}」这一步。${outcome.detail}`,
           );
+          flash(shotBtn, "截不到");
           return;
         }
-        showHint(`几何已缓存，但裁剪失败。${stashed.detail}`);
-        flash(shotBtn, "裁剪失败");
+        const shot = renderPendingCapture(outcome);
+        if (!shot) {
+          showHint(`几何已解析，但裁剪失败。${outcome.detail}`);
+          flash(shotBtn, "裁剪失败");
+          return;
+        }
+        const path = await saveShot(shot.dataUrl);
+        flash(shotBtn, `${shot.width}×${shot.height}`);
+        showHint(
+          `已保存 ${shot.width}×${shot.height} 到：${path ?? "（未能写盘）"}\n${outcome.detail}`,
+          path ? "ok" : "warn",
+        );
         return;
       }
 
@@ -755,10 +765,18 @@ export function createChatView(options: ChatViewOptions): ChatView {
         return;
       }
       const geometry = captureGeometry(located.selection);
-      const shot = geometry ? renderPendingCapture(geometry) : null;
-      if (!shot) {
-        showHint(`找到选区但无法解析截图区域。${report.text}`);
+      if (!geometry.ok) {
+        showHint(
+          `没有缓存几何，实时解析也失败于「${labelForStep(geometry.step)}」。` +
+            `${geometry.detail}（选区来源：${located.source}）`,
+        );
         flash(shotBtn, "定位失败");
+        return;
+      }
+      const shot = renderPendingCapture(geometry);
+      if (!shot) {
+        showHint(`找到选区但裁剪失败。${report.text}`);
+        flash(shotBtn, "裁剪失败");
         return;
       }
       const path = await saveShot(shot.dataUrl);
@@ -793,6 +811,26 @@ export function createChatView(options: ChatViewOptions): ChatView {
     }
   }
 
+
+  /** Name the geometry step that failed, in the user's terms. */
+  function labelForStep(step: string): string {
+    switch (step) {
+      case "selection":
+        return "读取选区";
+      case "textLayer":
+        return "查找文字层";
+      case "canvas":
+        return "查找页面画布";
+      case "layerBox":
+        return "测量文字层";
+      case "rects":
+        return "测量选区矩形";
+      case "clamp":
+        return "裁剪范围";
+      default:
+        return step;
+    }
+  }
 
   /** Explain which lookup failed, in the user's terms. */
   function labelForMissing(kind: string | undefined): string {

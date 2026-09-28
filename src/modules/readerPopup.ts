@@ -213,18 +213,37 @@ function dismissSelectionPopup(doc: Document): void {
  * the built-in selection popup — the one path known to hold the selection.
  */
 function stashCaptureFromReader(reader: ReaderInstance): void {
+  // Always stash an outcome, failures included: this handler is the only place
+  // that runs while the selection is still alive, so it is also the only place
+  // that can report *why* a capture is impossible. Without that, the panel can
+  // only say "nothing was captured".
   try {
     const win = reader?._iframeWindow;
     const sel = win?.getSelection?.();
     if (!sel || !sel.rangeCount) {
+      stashPendingCapture(
+        {
+          ok: false,
+          step: "selection",
+          detail: `弹窗时 reader 选区为空 (iframeWindow=${win ? "有" : "无"})`,
+        },
+        reader?.itemID,
+      );
       return;
     }
-    const geometry = captureGeometry(sel as unknown as Selection);
-    if (geometry) {
-      stashPendingCapture(geometry, reader?.itemID);
-    }
+    stashPendingCapture(
+      captureGeometry(sel as unknown as Selection),
+      reader?.itemID,
+    );
   } catch (e) {
-    Zotero.debug(`[Highlight Ask] stash failed: ${(e as Error)?.message || e}`);
+    stashPendingCapture(
+      {
+        ok: false,
+        step: "selection",
+        detail: `异常: ${(e as Error)?.message || e}`,
+      },
+      reader?.itemID,
+    );
   }
 }
 
