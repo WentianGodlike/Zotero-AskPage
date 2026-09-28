@@ -41,6 +41,9 @@ import {
   trimFullText,
   extractNearby,
   DEFAULT_SCENARIO_PROMPT,
+  DEFAULT_TRANSLATE_TASK,
+  QUICK_ACTIONS,
+  resolveTaskPrompt,
 } from "../src/modules/prompts";
 import {
   appendTurn,
@@ -735,6 +738,56 @@ test("nearby text identical to the selection is not repeated", () => {
     nearby: "same",
   });
   assert.ok(!user.includes("附近的原文"));
+});
+
+console.log("\ntranslate prompt");
+// The translation prompt is the one users hit most often and the one that has
+// regressed twice, so its contract is pinned down here.
+const translateAction = QUICK_ACTIONS.find((a) => a.id === "translate")!;
+
+test("the translate action exists and uses the default prompt", () => {
+  assert.ok(translateAction, "translate quick action is missing");
+  assert.equal(translateAction.defaultPrompt, DEFAULT_TRANSLATE_TASK);
+});
+
+test("forbids bilingual parenthetical glosses", () => {
+  // "keep technical terms in English" produced `离散化 (discretization)`,
+  // which makes a translation markedly harder to read.
+  assert.match(DEFAULT_TRANSLATE_TASK, /不要中英对照/);
+  assert.match(DEFAULT_TRANSLATE_TASK, /括号夹注/);
+  assert.ok(
+    !/专业术语保留英文原词/.test(DEFAULT_TRANSLATE_TASK),
+    "the instruction that caused the glossing is back",
+  );
+});
+
+test("says only names, abbreviations and symbols keep their original form", () => {
+  assert.match(DEFAULT_TRANSLATE_TASK, /人名、模型名、缩写、符号保留原样/);
+});
+
+test("demands a clean result with no added commentary", () => {
+  assert.match(DEFAULT_TRANSLATE_TASK, /只输出译文本身/);
+  for (const forbidden of ["不要解释", "不要总结", "不要补充背景", "不要评论"]) {
+    assert.ok(
+      DEFAULT_TRANSLATE_TASK.includes(forbidden),
+      `missing constraint: ${forbidden}`,
+    );
+  }
+});
+
+test("protects LaTeX from being explained away", () => {
+  assert.match(DEFAULT_TRANSLATE_TASK, /LaTeX 原样/);
+});
+
+test("forbids inventing content for damaged PDF text", () => {
+  // A translator that fills gaps is worse than a literal one: the reader
+  // cannot tell invented text from the source.
+  assert.match(DEFAULT_TRANSLATE_TASK, /不要凭空补写/);
+});
+
+test("the scenario layer also forbids glossing and enforces the task", () => {
+  assert.match(DEFAULT_SCENARIO_PROMPT, /括号夹注/);
+  assert.match(DEFAULT_SCENARIO_PROMPT, /严格按「问题」里提出的要求作答/);
 });
 
 console.log("\ntrimFullText");

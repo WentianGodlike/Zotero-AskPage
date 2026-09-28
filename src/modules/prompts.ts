@@ -22,6 +22,35 @@ import { getPref } from "../utils/prefs";
  * question, the full text — in the user message, after the stable part.
  */
 
+/**
+ * Default prompt for the 翻译 quick action.
+ *
+ * Modelled on the widely used translator-plugin prompt: state the role, name
+ * the direction, demand fluency and fidelity, and forbid commentary.
+ *
+ * Two deliberate departures from that reference:
+ *
+ *  - It does NOT ask to "keep technical terms in English". That instruction
+ *    reliably produces bilingual clutter — `离散化 (discretization)` — which
+ *    makes a translation harder to read, not easier. Only names, abbreviations
+ *    and symbols keep their original form, because those have no settled
+ *    translation.
+ *  - It keeps the "no speculation" clause. A translator that invents text to
+ *    smooth over a mangled PDF fragment is worse than one that stays literal,
+ *    since the reader cannot tell the invention from the source.
+ */
+export const DEFAULT_TRANSLATE_TASK = `请把下面这段学术文本翻译成中文。
+
+要求：
+- 准确、通顺，符合中文学术表达习惯，按中文语序组织句子
+- 不要中英对照：不要写成「中文（English）」这种括号夹注的形式
+- 人名、模型名、缩写、符号保留原样；其余词汇正常译成中文
+- 数学公式保持 LaTeX 原样，不要展开解释
+- 不要逐词硬译，也不要意译到偏离原意
+
+只输出译文本身：不要解释、不要总结、不要补充背景、不要评论、不要加标题。
+如果原文因 PDF 抽取而残缺，按最可能的意思翻译，不要凭空补写内容。`;
+
 /** Built-in quick actions shown in the reader selection popup. */
 export interface QuickAction {
   id: string;
@@ -46,10 +75,7 @@ export const QUICK_ACTIONS: QuickAction[] = [
     label: "翻译",
     title: "只翻译选中的内容，不要讲解",
     prefKey: "promptTaskTranslate",
-    defaultPrompt:
-      "请把这段翻译成中文，专业术语保留英文原词。\n" +
-      "只输出译文本身：不要解释、不要总结、不要补充背景、不要评论。\n" +
-      "公式保持 LaTeX 原样，不要展开说明。",
+    defaultPrompt: DEFAULT_TRANSLATE_TASK,
   },
   {
     id: "role",
@@ -83,7 +109,8 @@ export const DEFAULT_SCENARIO_PROMPT = `关于你收到的文本，必须知道�
 - 若原式残缺，给出你推测的完整形式，并标出哪部分是你的推测
 
 回答要求：
-- 用中文，专业术语保留英文原词
+- 用中文回答。术语默认译成中文；只有人名、模型名、缩写和符号保留原样；
+  不要写成「中文（English）」这种括号夹注
 - 直接回答，不要客套话，不要复述原文
 - 信息确实不足时，明确说缺什么，并给出最可能的解释
 - 严格按「问题」里提出的要求作答：如果只要求翻译，就只给译文，
