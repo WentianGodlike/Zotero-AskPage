@@ -288,27 +288,104 @@ export function createChatView(options: ChatViewOptions): ChatView {
   ): boolean => {
     const ok = renderMath(el, latex, display);
     if (ok && display) {
-      // Measure after the element is in the document.
-      const check = () => {
-        try {
-          const overflows = el.scrollWidth > el.clientWidth + 1;
-          el.classList.toggle("ha-math-overflow", overflows);
-          if (overflows) {
-            Zotero.debug(
-              `[Highlight Ask] formula overflows: ${el.scrollWidth} > ${el.clientWidth}`,
-            );
-          }
-        } catch {
-          /* measuring is best-effort */
-        }
-      };
-      // `setTimeout` rather than `requestAnimationFrame`: the plugin sandbox
-      // does not expose rAF, and the check only needs to run after layout.
-      setTimeout(check, 0);
-      setTimeout(check, 80);
+      // Two ticks: one after the current task, one after layout has settled
+      // (fonts can change the width).
+      setTimeout(() => attachScrollBar(el), 0);
+      setTimeout(() => attachScrollBar(el), 120);
     }
     return ok;
   };
+
+  /**
+   * Give a too-wide formula a scroll bar that is actually visible.
+   *
+   * The native scroll bar cannot be relied on here: Gecko ignores
+   * `::-webkit-scrollbar`, so the styling was inert, and `scrollbar-width: thin`
+   * with a translucent colour is effectively invisible. The reader then sees a
+   * formula cut off at the right edge with nothing suggesting there is more.
+   *
+   * So the bar is drawn: a track with a thumb sized and positioned from the
+   * scroll ratio, updated on scroll and on resize. It doubles as the indicator
+   * that the formula continues.
+   */
+  function attachScrollBar(el: HTMLElement) {
+    try {
+      if (el.scrollWidth <= el.clientWidth + 1) {
+        el.classList.remove("ha-math-overflow");
+        return;
+      }
+      el.classList.add("ha-math-overflow");
+      if (el.dataset.haBar === "1") {
+        syncBar(el);
+        return;
+      }
+      el.dataset.haBar = "1";
+
+      const bar = doc.createElement("div");
+      bar.className = "ha-math-bar";
+      const thumb = doc.createElement("div");
+      thumb.className = "ha-math-bar-thumb";
+      bar.appendChild(thumb);
+      el.appendChild(bar);
+
+      // Dragging the thumb scrolls the formula.
+      const drag = (event: Event) => {
+        event.preventDefault();
+        const startX = (event as MouseEvent).clientX;
+        const startLeft = el.scrollLeft;
+        const trackWidth = bar.clientWidth || 1;
+        const ratio = el.clientWidth / Math.max(1, el.scrollWidth);
+        const move = (moveEvent: MouseEvent) => {
+          const delta = moveEvent.clientX - startX;
+          el.scrollLeft = startLeft + delta / Math.max(0.05, ratio * (trackWidth / el.clientWidth));
+        };
+        const up = () => {
+          doc.removeEventListener("mousemove", move as EventListener);
+          doc.removeEventListener("mouseup", up);
+        };
+        doc.addEventListener("mousemove", move as EventListener);
+        doc.addEventListener("mouseup", up);
+      };
+      thumb.addEventListener("mousedown", drag);
+
+      el.addEventListener("scroll", () => syncBar(el));
+      try {
+        // Optional: the sandbox may not provide ResizeObserver, in which case
+        // the bar simply does not follow font-size changes.
+        const Ctor = (doc.defaultView as any)?.ResizeObserver as
+          | (new (cb: () => void) => { observe(target: Element): void })
+          | undefined;
+        const observer = Ctor ? new Ctor(() => syncBar(el)) : null;
+        observer?.observe(el);
+      } catch {
+        /* resize observation is optional */
+      }
+      syncBar(el);
+    } catch (e) {
+      Zotero.debug(`[Highlight Ask] scroll bar failed: ${(e as Error)?.message || e}`);
+    }
+  }
+
+  /** Position the thumb from the current scroll offset. */
+  function syncBar(el: HTMLElement) {
+    try {
+      const bar = el.querySelector(".ha-math-bar") as HTMLElement | null;
+      const thumb = el.querySelector(".ha-math-bar-thumb") as HTMLElement | null;
+      if (!bar || !thumb) {
+        return;
+      }
+      const visible = el.clientWidth / Math.max(1, el.scrollWidth);
+      const trackWidth = bar.clientWidth || el.clientWidth;
+      const thumbWidth = Math.max(28, Math.round(trackWidth * visible));
+      const maxScroll = Math.max(1, el.scrollWidth - el.clientWidth);
+      const progress = Math.min(1, Math.max(0, el.scrollLeft / maxScroll));
+      thumb.style.width = `${thumbWidth}px`;
+      thumb.style.marginLeft = `${Math.round((trackWidth - thumbWidth) * progress)}px`;
+      bar.classList.toggle("ha-math-bar-end", progress > 0.98);
+    } catch {
+      /* best effort */
+    }
+  }
 
   /** Markdown options used everywhere in this view. */
   const mdOptions: RenderOptions = { renderMath: renderMathFlaggingOverflow };
@@ -1403,10 +1480,10 @@ const CSS = `
 
 /* Rendered display maths scrolls sideways instead of being clipped.
    The sidebar is narrow and formulas are wide, so a long equation has to be
-   reachable rather than cut off at both ends — which is what centring does
-   inside an overflowing box. A max-width of 100% plus min-width 0 is what
-   actually enables the scroll: a flex item defaults to min-width auto and
-   would otherwise grow past the panel. */
+   reachable rather than cut off at one end — which is what centring does inside
+   an overflowing box. A max-width of 100% plus min-width 0 is what enables the
+   scroll: a flex item defaults to min-width auto and would otherwise grow past
+   the panel. */
 .ha-chat .ha-math-block.ha-math-rendered,
 .ha-chat .ha-math-display {
   max-width: 100%;
@@ -1414,39 +1491,48 @@ const CSS = `
   overflow-x: auto;
   overflow-y: hidden;
   text-align: center;
-  /* Keep the formula on one line so it scrolls rather than wraps; a wrapped
-     matrix or fraction is harder to read than a scrolled one. */
+  /* One line, so the formula scrolls rather than wraps. */
   white-space: nowrap;
-  /* A visible bar: an overlay scrollbar that only appears while scrolling is
-     no help when the reader does not know there is more to the right. */
-  scrollbar-width: thin;
-  scrollbar-color: #b9c0cc transparent;
-  padding-bottom: 10px;
+  /* The native scroll bar is hidden: it cannot be styled usefully in Gecko
+     (::-webkit-scrollbar is ignored) and thin translucent bars are invisible.
+     A drawn bar replaces it — see attachScrollBar. */
+  scrollbar-width: none;
+  padding-bottom: 2px;
+  position: relative;
 }
-.ha-chat .ha-math-block.ha-math-rendered::-webkit-scrollbar {
-  height: 8px;
-}
-.ha-chat .ha-math-block.ha-math-rendered::-webkit-scrollbar-track {
-  background: #e9e4f7;
-  border-radius: 4px;
-}
-.ha-chat .ha-math-block.ha-math-rendered::-webkit-scrollbar-thumb {
-  background: #b9a9e6;
-  border-radius: 4px;
-}
-.ha-chat .ha-math-block.ha-math-rendered::-webkit-scrollbar-thumb:hover {
-  background: #9c88d8;
-}
-/* A formula wider than the panel. The script adds this class after measuring,
-   because an overlay scrollbar is invisible until the reader scrolls — which
-   they will not do if nothing suggests there is more to see. */
+.ha-chat .ha-math-block.ha-math-rendered::-webkit-scrollbar { height: 0; display: none; }
+
+/* A formula wider than the panel: a drawn track and thumb, plus a right-edge
+   shadow so the cut-off side is obvious even before scrolling. */
 .ha-chat .ha-math-overflow {
   padding-bottom: 14px;
-  box-shadow: inset -14px 0 12px -12px rgba(47, 111, 235, 0.45);
+  box-shadow: inset -12px 0 10px -11px rgba(47, 111, 235, 0.5);
 }
-.ha-chat .ha-math-overflow::-webkit-scrollbar-track {
-  background: #ddd3f5;
+.ha-chat .ha-math-bar {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 2px;
+  height: 8px;
+  border-radius: 4px;
+  background: #e4dcf7;
+  cursor: pointer;
 }
+.ha-chat .ha-math-bar-thumb {
+  height: 8px;
+  border-radius: 4px;
+  background: #9c88d8;
+  cursor: grab;
+}
+.ha-chat .ha-math-bar-thumb:hover { background: #7f66c9; }
+.ha-chat .ha-math-bar-end .ha-math-bar-thumb { background: #b9a9e6; }
+.ha-chat .ha-math-scroll-note {
+  font-size: 10.5px;
+  color: #8b7bbd;
+  text-align: center;
+  margin: -4px 0 8px;
+}
+
 /* KaTeX's display mode centres with a full-width block; inside a scroller that
    pushes the left edge out of reach, so let the content size itself. */
 .ha-chat .ha-math-block.ha-math-rendered .katex-display {
