@@ -656,7 +656,7 @@ export function createChatView(options: ChatViewOptions): ChatView {
   setQuote(seedSelection);
   // Fetch Zotero's KaTeX stylesheet once; until it lands, math still renders
   // (with the fallback chip styling) rather than breaking.
-  void installKatexStyles(doc);
+  void installKatexStyles(doc, rootURI);
   void loadPaperText().then(() => loadPreviousSession());
 
   if (options.manual && seedQuestion) {

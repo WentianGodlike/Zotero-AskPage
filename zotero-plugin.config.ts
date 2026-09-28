@@ -50,6 +50,15 @@ export default defineConfig({
         target: "firefox115",
         outfile: ".scaffold/build/addon/content/providers.data.js",
       },
+      {
+        // KaTeX's stylesheet, emitted as a file rather than imported so the
+        // runtime can rewrite its @font-face URLs to Zotero's copies before
+        // injecting it. Fonts themselves are NOT shipped — Zotero has them.
+        entryPoints: ["node_modules/katex/dist/katex.min.css"],
+        loader: { ".css": "copy" },
+        bundle: false,
+        outfile: ".scaffold/build/addon/content/katex.css",
+      },
     ],
   },
 
