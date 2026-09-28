@@ -1081,7 +1081,16 @@ const CSS = `
   font-size: 11px;
 }
 .ha-chat-btn.ha-chat-ghost:hover { background: var(--fill-quinary, #eef0f4); }
-.ha-chat-toggle.ha-chat-on { background: #2f6feb; color: #fff; }
+/* Active state for both the toggle inputs and the header buttons. The header
+   buttons carry the ha-chat-btn class, so a rule scoped only to ha-chat-toggle
+   silently never matched them — the button looked identical on and off.
+   (No backticks in this block: it is inside a template literal.) */
+.ha-chat-toggle.ha-chat-on,
+.ha-chat-btn.ha-chat-on {
+  background: #2f6feb;
+  color: #fff;
+  border-color: #2f6feb;
+}
 .ha-chat-send {
   background: #2f6feb;
   color: #fff;
