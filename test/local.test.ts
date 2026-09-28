@@ -1115,6 +1115,98 @@ test("a throwing Zotero.Items.get degrades to no match", () => {
   }
 });
 
+console.log("\nKaTeX SVG delimiters need the SVG namespace");
+// Tall delimiters — norms, big brackets — are inline SVG paths, not font
+// glyphs. Building them with createElement puts them in the HTML namespace,
+// where the browser renders nothing: the norm bars vanish while the rest of the
+// formula looks correct.
+function buildWithRecorder(latex: string, display = false) {
+  const made: Array<{ tag: string; ns: string; attrs: Record<string, string> }> = [];
+  const make = (tag: string, ns: string) => ({
+    tag,
+    ns,
+    attrs: {} as Record<string, string>,
+    kids: [] as any[],
+    setAttribute(k: string, v: string) {
+      this.attrs[k] = v;
+    },
+    appendChild(n: any) {
+      this.kids.push(n);
+    },
+  });
+  const doc = {
+    createElement(tag: string) {
+      const el = make(tag, "html");
+      made.push(el);
+      return el;
+    },
+    createElementNS(ns: string, tag: string) {
+      const el = make(tag, ns);
+      made.push(el);
+      return el;
+    },
+    createTextNode(t: string) {
+      return { text: t };
+    },
+  } as unknown as Document;
+  buildMathNodes(latexToNodes(latex, display), doc);
+  return made;
+}
+
+const SVG_NS = "http://www.w3.org/2000/svg";
+
+test("a norm delimiter is built as SVG in the SVG namespace", () => {
+  const made = buildWithRecorder(
+    "\\left\\| \\frac{\\partial L}{\\partial \\phi} \\right\\|^2",
+  );
+  const svgs = made.filter((e) => e.tag === "svg");
+  assert.equal(svgs.length, 2, `expected two bars, got ${svgs.length}`);
+  for (const svg of svgs) {
+    assert.equal(svg.ns, SVG_NS, "svg must be in the SVG namespace");
+  }
+  const paths = made.filter((e) => e.tag === "path");
+  assert.ok(paths.length > 0, "the bars are drawn as paths");
+  for (const path of paths) {
+    assert.equal(path.ns, SVG_NS, "path must be in the SVG namespace");
+    assert.ok(path.attrs.d, "a path without its d attribute draws nothing");
+  }
+});
+
+test("only the norm bars use SVG; other delimiters use font glyphs", () => {
+  // Verified against KaTeX 0.18: \left( \right), \left\{ \right\} and
+  // \left[ \right] all render from the Size fonts, while \| needs paths.
+  // Recording the real behaviour keeps the namespace rule pinned without
+  // asserting something KaTeX never does.
+  for (const tex of [
+    "\\left( \\frac{a}{b} \\right)",
+    "\\left\\{ \\frac{a}{b} \\right\\}",
+    "\\left[ \\begin{matrix} a & b \\\\ c & d \\end{matrix} \\right]",
+  ]) {
+    const made = buildWithRecorder(tex);
+    assert.equal(
+      made.filter((e) => e.tag === "svg").length,
+      0,
+      `${tex} unexpectedly produced SVG`,
+    );
+    assert.ok(
+      made.some((e) => (e.attrs.class ?? "").includes("delimsizing")),
+      `${tex} should still produce sized delimiters`,
+    );
+  }
+});
+
+test("plain formulas create no SVG at all", () => {
+  const made = buildWithRecorder("x^2 + y_i");
+  assert.equal(made.filter((e) => e.tag === "svg").length, 0);
+});
+
+test("non-SVG elements stay in the HTML namespace", () => {
+  const made = buildWithRecorder("\\frac{a}{b}");
+  for (const el of made) {
+    assert.equal(el.ns, "html", `${el.tag} should be HTML`);
+  }
+});
+
 console.log("\nfollow-up messages carry screenshots");
 // A screenshot used to work only for the first question of a session: the first
 // path attached it, and the follow-up path — which never called the assembler —

@@ -38,12 +38,46 @@ export interface MathNode {
 /** Marker tag used for text; the builder turns it into a text node. */
 const TEXT_TAG = "#text";
 
+const SVG_NS = "http://www.w3.org/2000/svg";
+
+/**
+ * Elements KaTeX emits that live in the SVG namespace.
+ *
+ * Tall delimiters — `\left\| ... \right\|`, big parentheses, `\left\{` — are
+ * drawn as inline SVG paths rather than scaled font glyphs. Creating those with
+ * `createElement` puts them in the HTML namespace, where the browser does not
+ * render them at all: the norm bars and big brackets simply vanish while the
+ * rest of the formula looks fine.
+ */
+const SVG_TAGS = new Set([
+  "svg",
+  "path",
+  "g",
+  "use",
+  "defs",
+  "rect",
+  "line",
+  "polyline",
+  "polygon",
+  "circle",
+  "ellipse",
+  "text",
+  "tspan",
+  "symbol",
+  "clipPath",
+  "mask",
+  "marker",
+]);
+
 /** Build real elements from a MathNode tree using the host's document. */
 export function buildMathNodes(node: MathNode, doc: Document): Node {
   if (node.tag === TEXT_TAG) {
     return doc.createTextNode(node.attrs.value ?? "");
   }
-  const el = doc.createElement(node.tag);
+  // Namespace matters: see SVG_TAGS.
+  const el = SVG_TAGS.has(node.tag)
+    ? doc.createElementNS(SVG_NS, node.tag)
+    : doc.createElement(node.tag);
   for (const [name, value] of Object.entries(node.attrs)) {
     el.setAttribute(name, value);
   }
@@ -57,7 +91,24 @@ export function buildMathNodes(node: MathNode, doc: Document): Node {
 /* Minimal HTML → node tree parser                                     */
 /* ------------------------------------------------------------------ */
 
-const VOID_TAGS = new Set(["br", "hr", "img", "input", "meta", "link"]);
+const VOID_TAGS = new Set([
+  "br",
+  "hr",
+  "img",
+  "input",
+  "meta",
+  "link",
+  // SVG elements KaTeX emits without a closing tag.
+  "path",
+  "use",
+  "rect",
+  "line",
+  "polyline",
+  "polygon",
+  "circle",
+  "ellipse",
+  "stop",
+]);
 
 const NAMED_ENTITIES: Record<string, string> = {
   amp: "&",
