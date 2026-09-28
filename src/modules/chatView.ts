@@ -9,10 +9,13 @@ import { buildFollowUpMessages, buildInitialMessages } from "./prompts";
 import { renderMarkdown, type RenderOptions } from "./markdown";
 import { installKatexStyles, renderMathInto } from "./katex";
 import {
-  captureSelectionToFile,
+  captureGeometry,
   describeGeometry,
   locateSelection,
+  renderPendingCapture,
+  takePendingCapture,
 } from "./screenshot";
+import { ensureDir, pluginRootDir } from "./storage";
 import { getPref } from "../utils/prefs";
 import { getPaperText, describePaperText, type PaperText } from "./fulltext";
 import { buildContext, bundleSize, type ContextBundle } from "./context";
@@ -715,39 +718,81 @@ export function createChatView(options: ChatViewOptions): ChatView {
 
   shotBtn.addEventListener("click", () => {
     void (async () => {
-      // The panel sits in the reader's outer window while the PDF is in the
-      // reader's own frame, so the selection comes from the reader instance.
+      // Preferred source: geometry resolved while the selection was still live,
+      // i.e. when the reader's selection popup rendered. Clicking into the
+      // sidebar clears the PDF selection, so a live lookup here finds nothing —
+      // which is exactly why the first attempts failed.
+      const stashed = takePendingCapture();
+      if (stashed) {
+        const shot = renderPendingCapture(stashed);
+        if (shot) {
+          const path = await saveShot(shot.dataUrl);
+          flash(shotBtn, `${shot.width}×${shot.height}`);
+          showHint(
+            `已保存 ${shot.width}×${shot.height} 到：${path ?? "（未能写盘）"}\n${stashed.detail}`,
+            path ? "ok" : "warn",
+          );
+          return;
+        }
+        showHint(`几何已缓存，但裁剪失败。${stashed.detail}`);
+        flash(shotBtn, "裁剪失败");
+        return;
+      }
+
+      // Fallback for a selection made without the popup appearing.
       const located = locateSelection(readerWindowRef());
-      const selection = located.selection;
-      const report = describeGeometry(selection);
+      const report = describeGeometry(located.selection);
       Zotero.debug(
         `[Highlight Ask] capture geometry: ${report.text} (via ${located.source})`,
       );
-
       if (!report.ok) {
-        // Say *what* is missing. "截不到" alone cannot be acted on.
         showHint(
-          `截图失败：没有找到${labelForMissing(report.missing)}。` +
-            `${report.text}（选区来源：${located.source}）`,
+          `截图失败：没有缓存几何，也没有找到${labelForMissing(report.missing)}。` +
+            `${report.text}（选区来源：${located.source}）\n` +
+            "请先用鼠标划选文字（等划线弹窗出现），再点截图预览。",
         );
         flash(shotBtn, "截不到");
         return;
       }
-
-      const result = await captureSelectionToFile(selection as Selection | null);
-      if (!result) {
-        showHint(`找到画布但裁剪失败（内容可能受保护）。${report.text}`);
-        flash(shotBtn, "裁剪失败");
+      const geometry = captureGeometry(located.selection);
+      const shot = geometry ? renderPendingCapture(geometry) : null;
+      if (!shot) {
+        showHint(`找到选区但无法解析截图区域。${report.text}`);
+        flash(shotBtn, "定位失败");
         return;
       }
-      const shown = `${result.width}×${result.height}`;
-      flash(shotBtn, shown);
-      showHint(
-        `已保存 ${shown} 到：${result.path ?? "（未能写盘）"}`,
-        "ok",
-      );
+      const path = await saveShot(shot.dataUrl);
+      flash(shotBtn, `${shot.width}×${shot.height}`);
+      showHint(`已保存 ${shot.width}×${shot.height} 到：${path ?? "（未能写盘）"}`, "ok");
     })();
   });
+
+  /** Write a captured PNG into the data directory and return its path. */
+  async function saveShot(dataUrl: string): Promise<string | null> {
+    try {
+      const dir = `${pluginRootDir()}/debug`;
+      const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+      const file = `${dir}/capture-${stamp}.png`;
+      const base64 = dataUrl.slice(dataUrl.indexOf(",") + 1);
+      const binary = atob(base64);
+      const bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i++) {
+        bytes[i] = binary.charCodeAt(i);
+      }
+      await ensureDir(dir);
+      await IOUtils.write(file, bytes);
+      Zotero.debug(`[Highlight Ask] capture saved: ${file}`);
+      return file;
+    } catch (e) {
+      Zotero.logError(
+        new Error(
+          `[Highlight Ask] could not save capture: ${(e as Error)?.message || e}`,
+        ),
+      );
+      return null;
+    }
+  }
+
 
   /** Explain which lookup failed, in the user's terms. */
   function labelForMissing(kind: string | undefined): string {

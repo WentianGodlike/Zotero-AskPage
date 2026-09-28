@@ -350,6 +350,116 @@ export function captureSelection(
 }
 
 /* ------------------------------------------------------------------ */
+/* Deferred capture                                                    */
+/* ------------------------------------------------------------------ */
+
+/**
+ * A capture reduced to plain data: a canvas plus a rectangle on it.
+ *
+ * The geometry is resolved while the selection is still alive — during
+ * `renderTextSelectionPopup`, when the reader hands us its own iframe window —
+ * and only the *rendering* happens later, when the button is pressed. Clicking
+ * into the sidebar removes the PDF's selection, so resolving it late is exactly
+ * what failed: the reader had a live selection at popup time and none after.
+ */
+export interface PendingCapture {
+  canvas: HTMLCanvasElement;
+  rect: Rect;
+  /** Page-space size, for the diagnostic message. */
+  detail: string;
+  /** The selection text, for cross-checking against the crop. */
+  text: string;
+}
+
+/**
+ * Resolve the crop region for a selection, without rendering it.
+ * Returns null when the page canvas or a usable rectangle cannot be found.
+ */
+export function captureGeometry(
+  selection: Selection | null,
+  opts: { padding?: number } = {},
+): PendingCapture | null {
+  try {
+    if (!selection || !selection.rangeCount) {
+      return null;
+    }
+    const range = selection.getRangeAt(0);
+    const textLayer = findTextLayer(range.startContainer);
+    const canvas = findPageCanvas(range.startContainer);
+    if (!textLayer || !canvas) {
+      return null;
+    }
+
+    const layerBox = textLayer.getBoundingClientRect();
+    if (layerBox.width <= 0 || layerBox.height <= 0) {
+      return null;
+    }
+
+    const lineRects: DOMRect[] = [];
+    const clientRects = range.getClientRects();
+    const count = clientRects ? clientRects.length : 0;
+    for (let i = 0; i < count; i++) {
+      const r = clientRects![i];
+      if (r.width > 1 && r.height > 1) {
+        lineRects.push(r);
+      }
+    }
+    if (!lineRects.length) {
+      return null;
+    }
+
+    const sx = canvas.width / layerBox.width;
+    const sy = canvas.height / layerBox.height;
+    const lineHeight = lineRects[0].height || 0;
+
+    const parts: Rect[] = [];
+    for (const r of lineRects) {
+      const inCanvas = scaleRectToCanvas(
+        { left: r.left, top: r.top, width: r.width, height: r.height },
+        {
+          left: layerBox.left,
+          top: layerBox.top,
+          width: layerBox.width,
+          height: layerBox.height,
+        },
+        canvas.width,
+        canvas.height,
+      );
+      parts.push(
+        expandForFormula(inCanvas, lineHeight * sy, sx, opts.padding ?? 2),
+      );
+    }
+
+    const union = unionRects(parts);
+    if (!union) {
+      return null;
+    }
+    const rect = clampRect(union, canvas.width, canvas.height);
+    if (!isUsableRect(rect)) {
+      return null;
+    }
+
+    return {
+      canvas,
+      rect,
+      detail: `canvas=${canvas.width}x${canvas.height} rect=${rect.left},${rect.top} ${rect.width}x${rect.height}`,
+      text: String(selection.toString() || ""),
+    };
+  } catch (e) {
+    Zotero.debug(`[Highlight Ask] geometry failed: ${(e as Error)?.message || e}`);
+    return null;
+  }
+}
+
+/** Render a previously resolved capture. */
+export function renderPendingCapture(
+  pending: PendingCapture,
+  scale = 2,
+): CropResult | null {
+  return cropCanvas(pending.canvas, pending.rect, scale);
+}
+
+/* ------------------------------------------------------------------ */
 /* Finding the live selection                                          */
 /* ------------------------------------------------------------------ */
 
@@ -583,4 +693,42 @@ export function dataUrlBytes(dataUrl: string): number {
   }
   const b64 = dataUrl.length - comma - 1;
   return Math.floor((b64 * 3) / 4);
+}
+
+/* ------------------------------------------------------------------ */
+/* Pending-capture stash                                               */
+/* ------------------------------------------------------------------ */
+
+/**
+ * The most recent capture resolved while a selection was live.
+ *
+ * A single slot is enough: only one selection can be active at a time, and the
+ * newest is always the relevant one. Keyed by item id so a change of paper
+ * cannot reuse a stale region.
+ */
+let pendingCapture: { itemID?: number; pending: PendingCapture } | null = null;
+
+export function stashPendingCapture(
+  pending: PendingCapture,
+  itemID?: number,
+): void {
+  pendingCapture = { itemID, pending };
+  Zotero.debug(`[Highlight Ask] capture stashed: ${pending.detail}`);
+}
+
+/** Retrieve a stash for this item, or the newest one when no id is given. */
+export function takePendingCapture(itemID?: number): PendingCapture | null {
+  if (!pendingCapture) {
+    return null;
+  }
+  if (itemID !== undefined && pendingCapture.itemID !== undefined && pendingCapture.itemID !== itemID) {
+    return null;
+  }
+  const { pending } = pendingCapture;
+  pendingCapture = null;
+  return pending;
+}
+
+export function hasPendingCapture(): boolean {
+  return pendingCapture !== null;
 }
