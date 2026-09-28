@@ -4,6 +4,9 @@ import hooks from "./hooks";
 import { createZToolkit } from "./utils/ztoolkit";
 import { PROVIDERS, getProvider, validateSettings } from "./modules/providers";
 import { listModels } from "./modules/deepseek";
+import { promptFields } from "./modules/prompts";
+import { summarizeLog } from "./modules/requestLog";
+import { pluginRootDir } from "./modules/storage";
 
 class Addon {
   public data: {
@@ -39,6 +42,12 @@ class Addon {
     validateSettings: typeof validateSettings;
     /** Queries the configured endpoint's /models. */
     listModels: typeof listModels;
+    /** Editable prompts plus their defaults, for the settings editor. */
+    promptFields: typeof promptFields;
+    /** Aggregated request-log statistics. */
+    summarizeLog: typeof summarizeLog;
+    /** Where this plugin writes its files. */
+    dataDir: typeof pluginRootDir;
   };
 
   constructor() {
@@ -50,7 +59,15 @@ class Addon {
       ztoolkit: createZToolkit(),
     };
     this.hooks = hooks;
-    this.api = { providers: PROVIDERS, getProvider, validateSettings, listModels };
+    this.api = {
+      providers: PROVIDERS,
+      getProvider,
+      validateSettings,
+      listModels,
+      promptFields,
+      summarizeLog,
+      dataDir: pluginRootDir,
+    };
   }
 }
 

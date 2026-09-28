@@ -1,8 +1,20 @@
 import type { ReaderInstance } from "./readerPopup";
 import { streamChat, DeepSeekError, type ChatMessage } from "./deepseek";
-import { buildFollowUpMessages, buildInitialMessages } from "./prompts";
+import {
+  buildFollowUpMessages,
+  buildInitialMessages,
+  extractNearby,
+} from "./prompts";
 import { renderMarkdown } from "./markdown";
 import { getPref } from "../utils/prefs";
+import { getPaperText, describePaperText, type PaperText } from "./fulltext";
+import {
+  appendTurn,
+  makeSessionId,
+  persistSession,
+  type Session,
+} from "./notes";
+import { logRequest } from "./requestLog";
 
 /**
  * The floating panel that lives inside the reader's iframe document.
@@ -61,9 +73,28 @@ export function openAskPanel(options: OpenPanelOptions): void {
   const noteBtn = mkButton(doc, "存为笔记", "把问答保存为该文献的 Zotero 笔记");
   const closeBtn = mkButton(doc, "✕", "关闭");
 
+  // Per-panel "attach the whole paper" toggle. Off by default because it costs
+  // real tokens; on is worth it when a formula depends on something far away in
+  // the text.
+  const fullTextBtn = mkButton(doc, "全文", "把论文全文一起发给模型（更准，但更贵）");
+  fullTextBtn.classList.add("ha-toggle");
+  let wantFullText = Boolean(getPref("sendFullText"));
+  const paintFullTextBtn = () => {
+    fullTextBtn.classList.toggle("ha-on", wantFullText);
+    fullTextBtn.title = wantFullText
+      ? "已附带全文，点击关闭"
+      : "把论文全文一起发给模型（更准，但更贵）";
+  };
+  paintFullTextBtn();
+
   const header = doc.createElement("div");
   header.className = "ha-head";
-  header.append(title, spacer, copyBtn, noteBtn, closeBtn);
+  header.append(title, spacer, fullTextBtn, copyBtn, noteBtn, closeBtn);
+
+  // ---------- context status line ----------
+  const contextLine = doc.createElement("div");
+  contextLine.className = "ha-context";
+  contextLine.textContent = "上下文：选中片段";
 
   // ---------- selection preview ----------
   const quoteLabel = doc.createElement("div");
@@ -95,7 +126,7 @@ export function openAskPanel(options: OpenPanelOptions): void {
   inputRow.className = "ha-input-row";
   inputRow.append(input, sendBtn);
 
-  root.append(header, quote, convo, inputRow);
+  root.append(header, quote, contextLine, convo, inputRow);
   if (!doc.body) {
     return;
   }
@@ -107,6 +138,23 @@ export function openAskPanel(options: OpenPanelOptions): void {
   let lastAnswer = "";
   let busy = false;
   let destroyed = false;
+
+  /** The paper's indexed text, fetched once when the panel opens. */
+  let paperText: PaperText | null = null;
+  let paperTextResolved = false;
+
+  /**
+   * One session per panel opening. Turns are appended as answers arrive and the
+   * session is persisted after each one, so closing the reader mid-conversation
+   * does not lose what has already been answered.
+   */
+  const session: Session = {
+    id: makeSessionId(reader.itemID),
+    itemID: reader.itemID,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    turns: [],
+  };
 
   const handle: PanelHandle = {
     destroy() {
@@ -176,8 +224,10 @@ export function openAskPanel(options: OpenPanelOptions): void {
 
     const showReasoning = Boolean(getPref("showReasoning"));
     let reasoningBox: HTMLDetailsElement | null = null;
+    let reasoningText = "";
 
     const renderReasoning = (text: string) => {
+      reasoningText = text;
       if (!showReasoning || !text) {
         return;
       }
@@ -199,11 +249,15 @@ export function openAskPanel(options: OpenPanelOptions): void {
     abort = new AbortController();
     setBusy(true);
 
+    const startedAt = Date.now();
+    let firstTokenMs: number | undefined;
+
     try {
       const result = await streamChat({
         messages,
         signal: abort.signal,
         onDelta: (full) => {
+          firstTokenMs ??= Date.now() - startedAt;
           answerBody.classList.remove("ha-streaming");
           answerBody.replaceChildren(renderMarkdown(full, doc));
           scrollToBottom();
@@ -220,6 +274,33 @@ export function openAskPanel(options: OpenPanelOptions): void {
         meta.textContent = `${result.usage.total_tokens} tokens`;
         answerWrap.appendChild(meta);
       }
+
+      // Archive the turn. Fire-and-forget: the answer is already on screen and
+      // a storage failure must not look like a generation failure.
+      void archiveTurn({
+        question: echoQuestion || "",
+        answer: result.content,
+        reasoning: reasoningText || undefined,
+        selection,
+        tokens: result.usage?.total_tokens,
+      });
+
+      void logRequest({
+        ts: new Date().toISOString(),
+        sessionId: session.id,
+        itemID: reader.itemID,
+        provider: providerKey(),
+        model: modelName(),
+        firstTokenMs,
+        totalMs: Date.now() - startedAt,
+        promptTokens: result.usage?.prompt_tokens,
+        completionTokens: result.usage?.completion_tokens,
+        totalTokens: result.usage?.total_tokens,
+        selectionChars: selection.length,
+        questionChars: (echoQuestion || "").length,
+        fullTextChars: usedFullTextChars(),
+        hasReasoning: Boolean(reasoningText),
+      });
     } catch (e) {
       const err = e as DeepSeekError;
       if (err?.kind === "aborted") {
@@ -229,6 +310,21 @@ export function openAskPanel(options: OpenPanelOptions): void {
         answerWrap.remove();
         appendError(err?.message || String(e));
       }
+
+      void logRequest({
+        ts: new Date().toISOString(),
+        sessionId: session.id,
+        itemID: reader.itemID,
+        provider: providerKey(),
+        model: modelName(),
+        firstTokenMs,
+        totalMs: Date.now() - startedAt,
+        selectionChars: selection.length,
+        questionChars: (echoQuestion || "").length,
+        fullTextChars: usedFullTextChars(),
+        error: err?.message || String(e),
+        errorKind: err?.kind,
+      });
     } finally {
       abort = null;
       setBusy(false);
@@ -237,6 +333,35 @@ export function openAskPanel(options: OpenPanelOptions): void {
       }
     }
   }
+
+  /**
+   * Append a completed turn to the session and persist it.
+   * The note is the durable copy, so it is written by `persistSession`.
+   */
+  async function archiveTurn(turn: {
+    question: string;
+    answer: string;
+    reasoning?: string;
+    selection: string;
+    tokens?: number;
+  }) {
+    try {
+      const updated = appendTurn(session, {
+        ...turn,
+        ts: new Date().toISOString(),
+        model: modelName(),
+      });
+      session.turns = updated.turns;
+      session.updatedAt = updated.updatedAt;
+      await persistSession(session);
+    } catch (e) {
+      // Archiving is a convenience; never surface it as a failure of the answer.
+      Zotero.debug(
+        `[Highlight Ask] archiving failed: ${(e as Error)?.message || e}`,
+      );
+    }
+  }
+
 
   function submit() {
     const text = input.value.trim();
@@ -247,7 +372,7 @@ export function openAskPanel(options: OpenPanelOptions): void {
     input.style.height = "auto";
 
     if (history.length === 0) {
-      const messages = buildInitialMessages(selection, text);
+      const messages = buildInitialMessages(selection, text, firstTurnContext());
       history = messages;
       void ask(messages, text);
     } else {
@@ -257,6 +382,72 @@ export function openAskPanel(options: OpenPanelOptions): void {
       history = messages;
       void ask(messages, text);
     }
+  }
+
+  /* ---------------- context assembly ---------------- */
+
+  function providerKey(): string {
+    try {
+      return String(getPref("provider") || "deepseek");
+    } catch {
+      return "deepseek";
+    }
+  }
+
+  function modelName(): string {
+    try {
+      return String(getPref("model") || "");
+    } catch {
+      return "";
+    }
+  }
+
+  function usedFullTextChars(): number {
+    return wantFullText && paperText ? paperText.chars : 0;
+  }
+
+  /** Extra grounding attached to the first question of a session. */
+  function firstTurnContext() {
+    const nearby = getPref("sendNearby")
+      ? extractNearby(paperText?.text || "", selection)
+      : "";
+    return {
+      nearby: nearby || undefined,
+      fullText: wantFullText ? paperText?.text || undefined : undefined,
+    };
+  }
+
+  function paintContextLine() {
+    const bits = ["选中片段"];
+    if (getPref("sendNearby") && paperText?.text) {
+      bits.push("相邻段落");
+    }
+    if (wantFullText) {
+      bits.push(`全文 ${describePaperText(paperText)}`);
+    }
+    contextLine.textContent = `上下文：${bits.join(" + ")}`;
+    contextLine.classList.toggle("ha-warn", wantFullText && !paperText?.chars);
+  }
+
+  /** Fetch the paper's indexed text once, in the background. */
+  async function loadPaperText() {
+    if (paperTextResolved) {
+      return;
+    }
+    paperTextResolved = true;
+    try {
+      paperText = await getPaperText(reader.itemID);
+      // The title is useful grounding and cheap to include.
+      try {
+        const item = await Zotero.Items.getAsync(reader.itemID);
+        session.title = item?.getField?.("title") || undefined;
+      } catch {
+        /* title is optional */
+      }
+    } catch (e) {
+      Zotero.debug(`[Highlight Ask] paper text unavailable: ${(e as Error)?.message || e}`);
+    }
+    paintContextLine();
   }
 
   // ---------- events ----------
@@ -276,9 +467,6 @@ export function openAskPanel(options: OpenPanelOptions): void {
     }
   });
 
-  noteBtn.addEventListener("click", () => {
-    void saveNote(reader, selection, history, lastAnswer, noteBtn);
-  });
 
   input.addEventListener("input", () => {
     input.style.height = "auto";
@@ -305,82 +493,54 @@ export function openAskPanel(options: OpenPanelOptions): void {
   makeDraggable(doc, root, header);
   positionPanel(root, reader, doc);
 
+  // ---------- events (continued) ----------
+  fullTextBtn.addEventListener("click", () => {
+    wantFullText = !wantFullText;
+    paintFullTextBtn();
+    paintContextLine();
+    if (wantFullText && !paperText?.chars) {
+      void loadPaperText();
+    }
+  });
+
+  noteBtn.addEventListener("click", () => {
+    void saveNoteNow(noteBtn);
+  });
+
+  /** Explicit save, used by the 存为笔记 button. */
+  async function saveNoteNow(btn: HTMLElement) {
+    if (!session.turns.length) {
+      flash(btn, lastAnswer ? "正在保存…" : "暂无回答");
+      if (!lastAnswer) {
+        return;
+      }
+    }
+    const outcome = await persistSession(session);
+    if (outcome.note === "written") {
+      flash(btn, "已新建笔记");
+    } else if (outcome.note === "updated") {
+      flash(btn, "已更新笔记");
+    } else if (outcome.note === "skipped") {
+      flash(btn, outcome.json ? "已存 JSON" : "未开启保存");
+    } else {
+      flash(btn, "保存失败");
+    }
+  }
+
   // ---------- kick off ----------
+  void loadPaperText();
+  paintContextLine();
+
   if (manual) {
     input.value = question;
     input.focus();
   } else {
-    const messages = buildInitialMessages(selection, question);
+    const messages = buildInitialMessages(selection, question, firstTurnContext());
     history = messages;
     void ask(messages, question);
   }
 }
 
-/* ------------------------------------------------------------------ */
-/* Note saving                                                         */
-/* ------------------------------------------------------------------ */
-
-async function saveNote(
-  reader: ReaderInstance,
-  selection: string,
-  history: ChatMessage[],
-  lastAnswer: string,
-  btn: HTMLElement,
-) {
-  if (!lastAnswer) {
-    flash(btn, "暂无回答");
-    return;
-  }
-  try {
-    const item = await Zotero.Items.getAsync(reader.itemID);
-    if (!item) {
-      flash(btn, "找不到条目");
-      return;
-    }
-
-    const parts: string[] = [];
-    parts.push("<h1>Highlight Ask 问答</h1>");
-    parts.push("<h2>选中内容</h2>");
-    parts.push(`<blockquote>${escapeHtml(selection)}</blockquote>`);
-    parts.push("<h2>问答</h2>");
-
-    // Walk the stored history so multi-turn sessions are preserved.
-    for (const msg of history) {
-      if (typeof msg.content !== "string") {
-        continue;
-      }
-      if (msg.role === "user") {
-        parts.push(
-          `<p><strong>问：</strong>${escapeHtml(stripSelectionEcho(msg.content))}</p>`,
-        );
-      } else if (msg.role === "assistant") {
-        parts.push("<p><strong>答：</strong></p>");
-        // Keep the raw Markdown so the answer stays editable in the note.
-        parts.push(`<pre>${escapeHtml(msg.content)}</pre>`);
-      }
-    }
-
-    const note = new Zotero.Item("note");
-    note.libraryID = item.libraryID;
-    note.parentID = item.id;
-    note.setNote(parts.join("\n"));
-    await note.saveTx();
-    flash(btn, "已保存");
-  } catch (e) {
-    Zotero.logError(e as Error);
-    flash(btn, "保存失败");
-  }
-}
-
-/** The first user message embeds the selection; don't repeat it in the note. */
-function stripSelectionEcho(content: string): string {
-  const idx = content.lastIndexOf("问题：");
-  return idx >= 0 ? content.slice(idx + 3).trim() : content;
-}
-
-function escapeHtml(text: string): string {
-  return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-}
 
 function flash(btn: HTMLElement, text: string) {
   const original = btn.dataset.haLabel || btn.textContent || "";
@@ -548,6 +708,26 @@ const CSS = `
   background: #fbfbfd;
   border-bottom: 1px solid #eef0f4;
 }
+/* Toggle button in the header (全文 on/off). */
+.ha-btn.ha-toggle { background: #eceff4; }
+.ha-btn.ha-toggle.ha-on { background: #2f6feb; color: #fff; }
+.ha-btn.ha-toggle.ha-on:hover { background: #245bd0; }
+
+/* One-line status showing what context is being sent. */
+.ha-context {
+  flex: 0 0 auto;
+  padding: 4px 12px;
+  font-size: 11px;
+  color: #8a93a0;
+  background: #fbfbfd;
+  border-bottom: 1px solid #eef0f4;
+  user-select: none;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ha-context.ha-warn { color: #b45309; }
+
 .ha-quote-label {
   font-size: 11px;
   color: #8a93a0;
