@@ -24,6 +24,20 @@ export interface RenderOptions {
 
 const MATH_PLACEHOLDER_PREFIX = "\u0000MATH";
 
+/** One lifted-out formula: the LaTeX plus how it was delimited. */
+interface MathEntry {
+  latex: string;
+  /**
+   * Whether it was written as display maths (`$$`, `\[`).
+   *
+   * This has to travel with the formula. The placeholder is just an index, and
+   * a `$$...$$` sitting inside a paragraph used to be reconstructed with
+   * `display: false` — which silently renders a sum or a fraction at inline
+   * size, exactly the "flat formula" the reader notices.
+   */
+  display: boolean;
+}
+
 /**
  * Is a fenced block actually a formula?
  *
@@ -118,7 +132,7 @@ export function renderMarkdown(
   root.className = options.className || "ha-md";
   const renderMath = options.renderMath;
 
-  const mathStore: string[] = [];
+  const mathStore: MathEntry[] = [];
   const codeStore: { lang: string; code: string }[] = [];
 
   // ---- 1. Lift fenced code blocks out of the document -------------------
@@ -157,7 +171,7 @@ export function renderMarkdown(
       if (looksLikeFencedMath(lang, joined)) {
         // A formula the model wrapped in a fence: render it as maths rather
         // than showing its source in a code box.
-        mathStore.push(stripMathDelimiters(joined));
+        mathStore.push({ latex: stripMathDelimiters(joined), display: true });
         blocks.push({ kind: "math", index: mathStore.length - 1 });
         continue;
       }
@@ -173,7 +187,7 @@ export function renderMarkdown(
       const sameLineEnd = trimmed.length > 4 && trimmed.endsWith("$$");
       if (sameLineEnd) {
         flushText();
-        mathStore.push(trimmed.slice(2, -2).trim());
+        mathStore.push({ latex: trimmed.slice(2, -2).trim(), display: true });
         blocks.push({ kind: "math", index: mathStore.length - 1 });
         continue;
       }
@@ -195,7 +209,7 @@ export function renderMarkdown(
         // No closing delimiter yet (streaming) — just show the math.
         body.push("");
       }
-      mathStore.push(body.join("\n").trim());
+      mathStore.push({ latex: body.join("\n").trim(), display: true });
       blocks.push({ kind: "math", index: mathStore.length - 1 });
       continue;
     }
@@ -212,7 +226,7 @@ export function renderMarkdown(
       continue;
     }
     if (block.kind === "math") {
-      const latex = mathStore[block.index];
+      const latex = mathStore[block.index]?.latex ?? "";
       const el = doc.createElement("div");
       // The source stays in the class list so the CSS can style the fallback
       // state; a successful render replaces the text content below.
@@ -251,7 +265,7 @@ function renderTextBlock(
   doc: Document,
   root: HTMLElement,
   lines: string[],
-  mathStore: string[],
+  mathStore: MathEntry[],
   renderMath?: RenderOptions["renderMath"],
 ): void {
   let list: HTMLElement | null = null;
@@ -347,7 +361,7 @@ function appendInline(
   doc: Document,
   parent: HTMLElement,
   text: string,
-  mathStore: string[],
+  mathStore: MathEntry[],
   renderMath?: RenderOptions["renderMath"],
 ): void {
   // Protect inline math first so emphasis rules cannot chew through it.
@@ -355,16 +369,19 @@ function appendInline(
     /(\$\$[^$]+\$\$|\$[^$\n]+\$|\\\([^)]*\\\)|\\\[[^\]]*\\\])/g,
     (match) => {
       let inner = match;
+      let display = false;
       if (match.startsWith("$$") && match.endsWith("$$")) {
         inner = match.slice(2, -2);
+        display = true;
       } else if (match.startsWith("$") && match.endsWith("$")) {
         inner = match.slice(1, -1);
       } else if (match.startsWith("\\(")) {
         inner = match.slice(2, -2);
       } else if (match.startsWith("\\[")) {
         inner = match.slice(2, -2);
+        display = true;
       }
-      mathStore.push(inner);
+      mathStore.push({ latex: inner, display });
       return `${MATH_PLACEHOLDER_PREFIX}${mathStore.length - 1}\u0000`;
     },
   );
@@ -389,10 +406,17 @@ function appendInline(
       parent.appendChild(code);
     } else if (m[4] !== undefined) {
       // Math. Prefer the real renderer; fall back to showing the source.
-      const latex = mathStore[Number(m[4])] ?? "";
-      const el = doc.createElement("span");
-      el.className = "ha-math-inline";
-      if (!renderMath || !renderMath(el, latex, false)) {
+      const entry = mathStore[Number(m[4])];
+      const latex = entry?.latex ?? "";
+      const display = entry?.display ?? false;
+      const el = doc.createElement(display ? "div" : "span");
+      el.className = display ? "ha-math-block" : "ha-math-inline";
+      if (display) {
+        // A lifting placeholder flattens the paragraph structure, so display
+        // maths found inline is closed off as its own block below.
+        el.classList.add("ha-math-display");
+      }
+      if (!renderMath || !renderMath(el, latex, display)) {
         el.textContent = latex;
       }
       parent.appendChild(el);
