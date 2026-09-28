@@ -78,6 +78,46 @@ export async function loadSessionJson(id: string): Promise<Session | null> {
   }
 }
 
+/**
+ * Find the most recently updated archived session for a paper.
+ *
+ * Reads the JSON mirror rather than parsing note HTML: the mirror is already
+ * structured, and re-deriving turns from rendered markup would be brittle.
+ * Session ids embed the item id and a timestamp, so the newest is found by
+ * sorting the filenames — no need to open every file.
+ */
+export async function loadLatestSession(itemID: number): Promise<Session | null> {
+  if (!getPref("saveToJson")) {
+    return null;
+  }
+  const dir = sessionsDir();
+  try {
+    if (!(await IOUtils.exists(dir))) {
+      return null;
+    }
+    const entries = await IOUtils.getChildren(dir);
+    const mine = pickSessionFiles(
+      entries.map((p) =>
+        p.slice(Math.max(p.lastIndexOf("/"), p.lastIndexOf("\\")) + 1),
+      ),
+      itemID,
+    );
+
+    for (let i = mine.length - 1; i >= 0; i--) {
+      const session = await loadSessionJson(mine[i].replace(/\.json$/, ""));
+      if (session && session.turns.length) {
+        return session;
+      }
+    }
+    return null;
+  } catch (e) {
+    Zotero.debug(
+      `[Highlight Ask] could not list sessions: ${(e as Error)?.message || e}`,
+    );
+    return null;
+  }
+}
+
 /* ------------------------------------------------------------------ */
 /* Note rendering                                                      */
 /* ------------------------------------------------------------------ */
@@ -231,6 +271,26 @@ export async function persistSession(session: Session): Promise<SaveOutcome> {
 
   outcome.json = await saveSessionJson(session);
   return outcome;
+}
+
+/**
+ * Filter session filenames down to one item's, oldest first.
+ *
+ * The separator matters: a naive `startsWith("item1-")` also matches
+ * `item10-...`, which would show one paper the conversation belonging to
+ * another. Comparing the numeric part avoids that.
+ */
+export function pickSessionFiles(names: string[], itemID: number): string[] {
+  const wanted = String(itemID);
+  return names
+    .filter((name) => {
+      if (!name.endsWith(".json")) {
+        return false;
+      }
+      const match = /^item(\d+)-/.exec(name);
+      return Boolean(match) && match![1] === wanted;
+    })
+    .sort();
 }
 
 /* ------------------------------------------------------------------ */

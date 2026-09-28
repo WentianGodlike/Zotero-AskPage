@@ -4,7 +4,10 @@ import {
   registerReaderPopup,
   unregisterReaderPopup,
 } from "./modules/readerPopup";
-import { closePanel } from "./modules/askPanel";
+import {
+  registerReaderSidebar,
+  unregisterReaderSidebar,
+} from "./modules/sidebar";
 
 async function onStartup() {
   await Promise.all([
@@ -15,15 +18,18 @@ async function onStartup() {
 
   registerPrefsPane();
 
-  // The reader integration is the whole point of this plugin: add
-  // "解释这段 / 翻译 / 有何作用" buttons to the PDF text-selection popup.
+  // The reader sidebar is where the conversation lives.
+  registerReaderSidebar();
+
+  // The selection popup contributes the "解释这段 / 翻译 / 有何作用" buttons,
+  // which feed the sidebar.
   registerReaderPopup();
 
   addon.data.initialized = true;
 }
 
 async function onMainWindowLoad(win: _ZoteroTypes.MainWindow): Promise<void> {
-  // ztoolkit is per-window; the reader panel does not use it, but keeping it
+  // ztoolkit is per-window; the sidebar does not use it, but keeping it
   // initialized matches the template's expectations.
   addon.data.ztoolkit = createZToolkit();
   void win;
@@ -35,7 +41,7 @@ async function onMainWindowUnload(win: Window): Promise<void> {
 }
 
 function onShutdown(): void {
-  closePanel();
+  unregisterReaderSidebar();
   unregisterReaderPopup();
   ztoolkit.unregisterAll();
   addon.data.alive = false;

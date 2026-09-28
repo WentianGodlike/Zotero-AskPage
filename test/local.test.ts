@@ -35,6 +35,7 @@ import {
   makeSessionId,
   sessionChars,
   renderSessionHtml,
+  pickSessionFiles,
   type Session,
   type SessionTurn,
 } from "../src/modules/notes";
@@ -841,6 +842,41 @@ test("renderSessionHtml numbers turns in order", () => {
 });
 
 /* ---------------------------------------------------------------- */
+
+console.log("\npickSessionFiles");
+test("does not confuse item 1 with item 10", () => {
+  // A plain startsWith("item1-") would also match item10-, showing one paper
+  // another paper's conversation.
+  const names = [
+    "item10-2026-01-01T00-00-00-000.json",
+    "item1-2026-01-02T00-00-00-000.json",
+  ];
+  assert.deepEqual(pickSessionFiles(names, 1), ["item1-2026-01-02T00-00-00-000.json"]);
+  assert.deepEqual(pickSessionFiles(names, 10), ["item10-2026-01-01T00-00-00-000.json"]);
+});
+
+test("ignores files that are not sessions", () => {
+  const names = ["item5-a.json", "item5-a.json.tmp", "notes.txt", "itemx-a.json"];
+  assert.deepEqual(pickSessionFiles(names, 5), ["item5-a.json"]);
+});
+
+test("returns oldest first so the newest can be taken last", () => {
+  const names = [
+    "item3-b.json",
+    "item3-a.json",
+    "item3-c.json",
+  ];
+  assert.deepEqual(pickSessionFiles(names, 3), [
+    "item3-a.json",
+    "item3-b.json",
+    "item3-c.json",
+  ]);
+});
+
+test("returns an empty list when the item has no sessions", () => {
+  assert.deepEqual(pickSessionFiles(["item9-a.json"], 4), []);
+  assert.deepEqual(pickSessionFiles([], 4), []);
+});
 
 // The preference pane script needs its own sandboxed runner.
 registerPreferencesPaneTests(test);

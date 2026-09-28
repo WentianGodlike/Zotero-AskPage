@@ -53,6 +53,27 @@ export class DeepSeekError extends Error {
     super(message);
     this.name = "DeepSeekError";
   }
+
+  /**
+   * Whether retrying the same request could plausibly succeed.
+   *
+   * A missing API key or a bad model name will fail identically every time, so
+   * offering "retry" there just wastes the user's attention. Network failures,
+   * 5xx and truncated streams are worth another attempt.
+   */
+  get retryable(): boolean {
+    if (this.kind === "no-key" || this.kind === "aborted") {
+      return false;
+    }
+    if (this.kind === "network" || this.kind === "empty") {
+      return true;
+    }
+    if (this.kind === "http") {
+      // 4xx (other than 429) means the request itself is wrong.
+      return !this.status || this.status >= 500 || this.status === 429;
+    }
+    return false;
+  }
 }
 
 /** Join baseUrl + path without producing a double slash. */
