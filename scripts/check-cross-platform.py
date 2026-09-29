@@ -94,7 +94,10 @@ def check_python_version_safety() -> list[str]:
 def check_absolute_paths() -> list[str]:
     problems: list[str] = []
     pattern = os.path.join(SCRIPTS, "**", "*.py")
-    for path in sorted(glob.glob(pattern, recursive=True)):
+    for path in sorted(
+        glob.glob(pattern, recursive=True)
+        + glob.glob(os.path.join(SCRIPTS, "**", "*.mjs"), recursive=True)
+    ):
         rel = os.path.relpath(path, ROOT)
         for number, line in enumerate(open(path, encoding="utf-8"), 1):
             if re.search(r"""["']/(home|Users|mnt|opt|Volumes)/""", line):

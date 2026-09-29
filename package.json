@@ -16,9 +16,9 @@
   },
   "author": "yangruiyu (based on zotero-plugin-template by windingwind and contributors)",
   "bugs": {
-    "url": "https://github.com/windingwind/zotero-plugin-template/issues"
+    "url": "https://github.com/WentianGodlike/Zotero-AskPage/issues"
   },
-  "homepage": "",
+  "homepage": "https://github.com/WentianGodlike/Zotero-AskPage#readme",
   "license": "AGPL-3.0-or-later",
   "scripts": {
     "start": "zotero-plugin serve",

@@ -55,6 +55,13 @@ def _find_built_xpi() -> str:
         # Fall back to a name that at least points at the expected location, so
         # the error message is useful.
         return str(build / "plugin.xpi")
+    if len(found) > 1:
+        # Stale artefacts from an interrupted rename or a parallel build would
+        # otherwise be checked silently while the fresh one ships unverified.
+        print(
+            "WARN: multiple .xpi files in the build directory; "
+            "checking the first of: " + ", ".join(found)
+        )
     return found[0]
 
 DEFAULT_XPI = os.path.join(

@@ -9,11 +9,15 @@ name: CI
 #
 # The template also shipped `lint` and `test` jobs. They were removed because
 # neither can pass on a headless runner:
-#   - `test` runs `zotero-plugin test`, which drives a real Zotero GUI.
+#   - `test:zotero` runs `zotero-plugin test`, which drives a real Zotero GUI.
 #   - `lint` enforced Prettier, which is useful but reads as a red X on every
 #     push when the project does not follow it; it is available locally as
 #     `npm run lint:fix`.
 # A permanently red pipeline is worse than none: it teaches people to ignore it.
+#
+# `npm run check` (tsc + the headless unit tests) DOES run here: it needs no
+# Zotero and no GUI, and without it a regression could ride a green pipeline
+# into a release whenever the author forgot to run tests locally.
 
 on:
   push:
@@ -30,9 +34,13 @@ jobs:
       GITHUB_TOKEN: ${{ secrets.GitHub_TOKEN }}
     steps:
       - name: Setup JS
-        uses: zotero-plugin-dev/workflows/setup-js@main
+        # Pinned to a commit SHA: @main would let any upstream push change
+        # what this pipeline runs. Update deliberately, after reading the diff.
+        uses: zotero-plugin-dev/workflows/setup-js@6bc4563f443313f6cebd3e425ba02f8929fb8d3f
       - name: Run Build
         run: npm run build
+      - name: Type-check and unit tests
+        run: npm run check
       - name: Upload build result
         uses: actions/upload-artifact@v4
         with:

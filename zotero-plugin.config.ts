@@ -9,8 +9,11 @@ export default defineConfig({
   namespace: pkg.config.addonRef,
   // Gecko rejects an XPI whose manifest carries a malformed `update_url`, and
   // Zotero only reports that as "may not be compatible with this version".
-  // The value must therefore always be a well-formed absolute URL, even though
-  // this plugin is installed from a local file and never actually auto-updates.
+  // The value must therefore always be a well-formed absolute URL. It is also
+  // what Zotero polls for updates: releases publish update.json to the
+  // `release` tag (a prerelease kept separate from the versioned `v*` tags),
+  // and deleting that prerelease would leave every installed copy unable to
+  // see new versions.
   // `{{owner}}`/`{{repo}}` come from package.json's repository field.
   updateURL:
     "https://github.com/{{owner}}/{{repo}}/releases/download/release/{{updateJson}}",

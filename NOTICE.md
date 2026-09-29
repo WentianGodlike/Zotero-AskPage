@@ -26,14 +26,14 @@ AGPL-3.0-or-later**（见 `LICENSE`）。
 
 ## 2. 运行时依赖
 
-| 组件                                                                          | 许可    | 用途                                                                                                                                                                           |
-| ----------------------------------------------------------------------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| [KaTeX](https://katex.org/)                                                   | **MIT** | 数学排版。库被 bundle 进 `content/scripts/highlightask.js`，样式表输出为 `content/katex.css`。**不打包字体**——复用 Zotero 笔记编辑器自带的那套（见下）。MIT 与 AGPL-3.0 兼容。 |
-| [zotero-plugin-toolkit](https://github.com/windingwind/zotero-plugin-toolkit) | **MIT** | 被 bundle 进 `content/scripts/highlightask.js`。MIT 与 AGPL-3.0 兼容。                                                                                                         |
+| 组件                                                                          | 许可    | 用途                                                                                                                                         |
+| ----------------------------------------------------------------------------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| [KaTeX](https://katex.org/)                                                   | **MIT** | 数学排版。库被 bundle 进 `content/scripts/highlightask.js`，样式表输出为 `content/katex.css`，字体随插件分发（见下）。MIT 与 AGPL-3.0 兼容。 |
+| [zotero-plugin-toolkit](https://github.com/windingwind/zotero-plugin-toolkit) | **MIT** | 被 bundle 进 `content/scripts/highlightask.js`。MIT 与 AGPL-3.0 兼容。                                                                       |
 
 ### 关于 KaTeX 字体
 
-字体**随插件分发**（`addon/assets/fonts/` 下 20 个 woff2，约 254 KB）。
+字体**随插件分发**（`addon/assets/fonts/` 下 20 个 woff2，约 296 KB）。
 
 早期版本改为复用 Zotero 笔记编辑器自带的副本，以省下这点体积，但那是错的：
 Zotero 的字体文件名带**构建期内容哈希**（`KaTeX_AMS-Regular.73ea273a.woff2`），

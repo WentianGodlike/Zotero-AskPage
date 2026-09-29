@@ -31,8 +31,9 @@ pref("sendAnnotations", true);
 // there, which is where questions about a paper's maths tend to land.
 pref("sendSI", true);
 // Show a "截图预览" button in the panel: crops the current selection out of the
-// PDF canvas and saves it to <data dir>/highlight-ask/debug/ so it can be
-// inspected. Off by default; it is a development aid.
+// PDF canvas and saves it to the configurable screenshot directory so it can
+// be inspected. On by default — the capture preview is also how a reader
+// verifies what is actually being sent, not only a development aid.
 pref("debugScreenshot", true);
 // Where "截图预览" writes captured PNGs.
 //
