@@ -17,7 +17,10 @@ import { resolve } from "node:path";
 // global so the import works outside Zotero.
 (globalThis as any).Zotero = { debug: () => {} };
 
-import { normalizeSelection } from "../src/modules/readerPopup";
+import {
+  normalizeSelection,
+  matchActionsToButtons,
+} from "../src/modules/readerPopup";
 import { buildInitialMessages, buildFollowUpMessages } from "../src/modules/prompts";
 import {
   buildEndpoint,
@@ -1252,6 +1255,52 @@ test("non-SVG elements stay in the HTML namespace", () => {
   for (const el of made) {
     assert.equal(el.ns, "html", `${el.tag} should be HTML`);
   }
+});
+
+console.log("\nselection popup: action-to-button matching");
+// The row now also holds a free-form input and its send button, so matching by
+// index would silently bind each preset to the wrong action — the button would
+// still work, just do something else than its label says.
+test("pairs actions with buttons by id, not by position", () => {
+  const actions = [
+    { id: "explain", label: "解释这段" },
+    { id: "translate", label: "翻译" },
+    { id: "role", label: "有何作用" },
+  ];
+  const buttons = [
+    { dataset: { haAction: "role" } },
+    { dataset: { haAction: "explain" } },
+    { dataset: { haAction: "translate" } },
+  ];
+  const pairs = matchActionsToButtons(actions, buttons);
+  assert.equal(pairs.length, 3);
+  assert.equal(pairs[0].action.label, "有何作用");
+  assert.equal(pairs[1].action.label, "解释这段");
+  assert.equal(pairs[2].action.label, "翻译");
+});
+
+test("ignores buttons that carry no action id", () => {
+  // The send button for the free-form field has no action id.
+  const pairs = matchActionsToButtons(
+    [{ id: "explain" }],
+    [{ dataset: { haAction: "explain" } }, { dataset: {} }],
+  );
+  assert.equal(pairs.length, 1);
+});
+
+test("ignores unknown ids instead of throwing", () => {
+  const pairs = matchActionsToButtons(
+    [{ id: "explain" }],
+    [{ dataset: { haAction: "nope" } }],
+  );
+  assert.deepEqual(pairs, []);
+});
+
+test("every preset action has a unique id", () => {
+  // Ids are the binding key now, so a duplicate would make one preset
+  // unreachable while another ran twice.
+  const ids = QUICK_ACTIONS.map((a) => a.id);
+  assert.equal(new Set(ids).size, ids.length, ids.join(","));
 });
 
 console.log("\nrobustness: settings validation");
