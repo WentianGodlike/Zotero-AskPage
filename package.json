@@ -1,7 +1,7 @@
 {
   "name": "zotero-askpage",
   "type": "module",
-  "version": "0.17.0",
+  "version": "0.17.1",
   "description": "Highlight text in Zotero PDF reader and ask DeepSeek to explain it.",
   "config": {
     "addonName": "AskPage",
