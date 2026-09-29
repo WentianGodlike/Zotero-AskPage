@@ -406,6 +406,7 @@
     $("sendAnnotations").checked = Boolean(readPref("sendAnnotations", true));
     $("sendSI").checked = Boolean(readPref("sendSI", true));
     $("sendScreenshot").checked = Boolean(readPref("sendScreenshot", true));
+    $("popupWidth").value = String(readPref("popupWidth", 320));
     $("sendFullText").checked = Boolean(readPref("sendFullText", false));
     $("fullTextMaxChars").value = String(readPref("fullTextMaxChars", 120000));
     $("saveToNote").checked = Boolean(readPref("saveToNote", true));
@@ -495,6 +496,7 @@
     writePref("sendAnnotations", $("sendAnnotations").checked);
     writePref("sendSI", $("sendSI").checked);
     writePref("sendScreenshot", $("sendScreenshot").checked);
+    writePref("popupWidth", clampNumber($("popupWidth").value, 220, 800, 320));
     writePref("sendFullText", $("sendFullText").checked);
     writePref("saveToNote", $("saveToNote").checked);
     writePref("saveToJson", $("saveToJson").checked);
@@ -733,7 +735,16 @@
    * `find`/`run` are injectable so this can be unit tested (see
    * test/local.test.ts) without a real Zotero preference window.
    */
-  function whenReady(find, run) {
+  /** Clamp a numeric preference to a sane range. */
+function clampNumber(value, min, max, fallback) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) {
+    return fallback;
+  }
+  return Math.min(max, Math.max(min, Math.round(n)));
+}
+
+function whenReady(find, run) {
     find = find || function () {
       return $("provider");
     };

@@ -48,10 +48,9 @@ def extract() -> tuple[str, str]:
 def build(row_class: str, css: str) -> str:
     """Render the row inside a container matching the reader's own constraint.
 
-    The reader caps the selection popup at 198px (`reader.css`), and that cap is
-    the reason an earlier attempt to force a wider row pushed the send button
-    outside the popup. Reproducing the cap here is what makes the preview
-    trustworthy.
+    The reader caps the selection popup at 198px; the plugin raises that cap on
+    the popup element itself. The preview reproduces both, so it shows the same
+    width the reader will use.
     """
     # The reader's own rules for the popup shell, reduced to what affects layout.
     shell = """
@@ -64,7 +63,7 @@ def build(row_class: str, css: str) -> str:
       padding: 8px;
       gap: 8px;
     }
-    .selection-popup { max-width: 198px; padding: 8px; gap: 8px; }
+    .selection-popup { padding: 8px; gap: 8px; }
     """
     return f"""<!DOCTYPE html>
 <html><head><meta charset="utf-8"><style>
@@ -75,9 +74,9 @@ body {{ margin: 0; padding: 16px; background: #f4f5f7;
 {shell}
 {css}
 </style></head><body>
-<div class="label">划词弹窗（真实 CSS + 阅读器 198px 上限）</div>
-<div class="note">红色边框标出弹窗边界；内容超出即为溢出</div>
-<div class="view-popup selection-popup" style="outline:1px dashed #d33">
+<div class="label">划词弹窗（真实 CSS；宽度取自 popupWidth 偏好）</div>
+<div class="note">红色虚线为弹窗边界。注意阅读器本身的 198px 上限已由插件提高</div>
+<div class="view-popup selection-popup" style="outline:1px dashed #d33; max-width:320px !important">
   <div class="colors" style="display:flex;gap:4px">
     <span style="width:20px;height:20px;border-radius:4px;background:#ffd400"></span>
     <span style="width:20px;height:20px;border-radius:4px;background:#ff6666"></span>
@@ -90,7 +89,7 @@ body {{ margin: 0; padding: 16px; background: #f4f5f7;
       <button class="ha-selection-btn">有何作用</button>
     </div>
     <div class="ha-ask-form">
-      <textarea class="ha-ask-input" rows="2" placeholder="或直接提问，回车发送"></textarea>
+      <input type="text" class="ha-ask-input" placeholder="或直接提问，回车发送">
       <button class="ha-ask-send">提问</button>
     </div>
   </div>

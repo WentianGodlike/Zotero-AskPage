@@ -38,6 +38,13 @@ pref("debugScreenshot", true);
 // fractions and drops norm bars, so a screenshot is the only reliable source
 // for formulas. Large selections are tiled so nothing is resampled.
 pref("sendScreenshot", true);
+// Width of the selection popup, in pixels.
+//
+// The reader caps it at 198px, which is too narrow for the question field; the
+// plugin raises the cap on the popup element itself. The reader measures the
+// popup at runtime and clamps it to the viewport, so any reasonable value is
+// positioned correctly.
+pref("popupWidth", 320);
 // Character budget per SI document.
 pref("siMaxChars", 200000);
 // Default state of the per-panel "全文" toggle.
