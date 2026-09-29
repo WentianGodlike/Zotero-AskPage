@@ -35,7 +35,9 @@ const BTN_CSS = `
   display: flex;
   gap: 4px;
   align-items: center;
+  flex-wrap: wrap;
   padding: 2px 4px;
+  max-width: 380px;
 }
 .${BTN_ROW_CLASS} .ha-selection-btn {
   font: 12px/1.4 -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
@@ -50,6 +52,43 @@ const BTN_CSS = `
 }
 .${BTN_ROW_CLASS} .ha-selection-btn:hover { background: #245bd0; }
 .${BTN_ROW_CLASS} .ha-selection-btn:active { background: #1d4bb0; }
+
+/* Free-form question, on its own line under the preset buttons. */
+.${BTN_ROW_CLASS} .ha-ask-form {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  width: 100%;
+  margin-top: 4px;
+}
+.${BTN_ROW_CLASS} .ha-ask-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  font: 12px/1.4 -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  color: var(--fill-primary, #1f2329);
+  background: var(--material-background, #fff);
+  border: 1px solid var(--fill-quaternary, #c9d0da);
+  border-radius: 6px;
+  padding: 4px 8px;
+  margin: 0;
+}
+.${BTN_ROW_CLASS} .ha-ask-input:focus {
+  outline: none;
+  border-color: #2f6feb;
+  box-shadow: 0 0 0 2px rgba(47, 111, 235, 0.18);
+}
+.${BTN_ROW_CLASS} .ha-ask-send {
+  font: 12px/1.4 -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  color: #fff;
+  background: #2f6feb;
+  border: 0;
+  border-radius: 6px;
+  padding: 4px 12px;
+  margin: 0;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.${BTN_ROW_CLASS} .ha-ask-send:hover { background: #245bd0; }
 `;
 
 function ensureButtonStyles(doc: Document) {
@@ -136,17 +175,46 @@ function onRenderTextSelectionPopup(event: any): void {
       btn.className = "ha-selection-btn";
       btn.textContent = action.label;
       btn.title = action.title;
+      // Marked explicitly: `wireButtons` used to match buttons to QUICK_ACTIONS
+      // by index, so any extra button in the row would shift every binding.
+      btn.dataset.haAction = action.id;
       // Keep the PDF selection alive while the user moves to click.
       btn.addEventListener("mousedown", (e: Event) => e.stopPropagation());
       row.appendChild(btn);
     }
 
+    const form = doc.createElement("div");
+    form.className = "ha-ask-form";
+
+    const input = doc.createElement("input");
+    input.type = "text";
+    input.className = "ha-ask-input";
+    // Explains the feature on hover and doubles as the visible hint that this
+    // row accepts free-form questions, not just the three presets.
+    input.placeholder = "或直接提问，回车发送…";
+    input.title = "输入问题后回车：会带上这段划线一起发给 AI";
+    // Keep the PDF selection alive while typing, and stop the reader from
+    // treating keystrokes as shortcuts.
+    for (const type of ["mousedown", "mouseup", "click", "keydown", "keyup"]) {
+      input.addEventListener(type, (e: Event) => e.stopPropagation());
+    }
+    form.appendChild(input);
+
+    const send = doc.createElement("button");
+    send.type = "button";
+    send.className = "ha-ask-send";
+    send.textContent = "提问";
+    send.dataset.haSend = "1";
+    form.appendChild(send);
+
+    row.appendChild(form);
     append(row);
 
     // Re-find the *cloned* node and attach real handlers there.
     const mounted =
       (doc.querySelector(`.${BTN_ROW_CLASS}`) as HTMLElement | null) ?? row;
     wireButtons(mounted, reader, selection);
+    wireAskForm(mounted, reader, selection);
   } catch (e) {
     Zotero.logError(e as any);
   }
@@ -158,40 +226,132 @@ function wireButtons(
   selection: string,
 ): void {
   const buttons = Array.from(
-    row.querySelectorAll("button"),
+    row.querySelectorAll("[data-ha-action]"),
   ) as HTMLElement[];
-  buttons.forEach((btn, index) => {
-    const action = QUICK_ACTIONS[index];
-    if (!action) {
-      return;
-    }
-    btn.addEventListener("click", (e: Event) => {
+  for (const pair of matchActionsToButtons(QUICK_ACTIONS, buttons)) {
+    pair.button.addEventListener("click", (e: Event) => {
       e.preventDefault();
       e.stopPropagation();
-      const doc = row.ownerDocument;
-      if (!doc) {
-        return;
-      }
-      const question = resolveTaskPrompt(action);
-      const delivered = askInSidebar({
-        itemID: reader.itemID,
+      askAndReport(
+        reader,
         selection,
-        question,
-      });
-      if (!delivered) {
-        // Distinguish "the pane is not open at all" from "a pane for another
-        // item is open" — the fix differs, and a vague message sends the user
-        // looking in the wrong place.
-        const message = anyViewMounted()
-          ? "这个对话属于另一篇文献。请先选中本篇文献，让右侧「AI 助手」显示出来再试。"
-          : "右侧还没有打开「AI 助手」面板。展开右侧栏的信息区，让 Highlight Ask 出现后再试。";
-        new ztoolkit.ProgressWindow("Highlight Ask", { closeOnClick: true })
-          .createLine({ text: message, type: "fail" })
-          .show();
-      }
-      // Dismiss Zotero's own popup so it does not overlap the sidebar.
-      dismissSelectionPopup(doc);
+        resolveTaskPrompt(pair.action),
+        row.ownerDocument,
+      );
     });
+  }
+}
+
+/**
+ * Pair preset actions with their buttons by id.
+ *
+ * Deliberately not by index. The row also holds the free-form input and its
+ * send button, so `querySelectorAll("button")[i]` would drift out of step with
+ * `QUICK_ACTIONS` the moment anything is added — and the failure is silent:
+ * each button would run a different action than its label says.
+ */
+export function matchActionsToButtons<
+  T extends { id: string },
+  B extends { dataset: { haAction?: string } },
+>(actions: readonly T[], buttons: readonly B[]): Array<{ action: T; button: B }> {
+  const out: Array<{ action: T; button: B }> = [];
+  for (const button of buttons) {
+    const id = button.dataset?.haAction;
+    if (!id) {
+      continue;
+    }
+    const action = actions.find((a) => a.id === id);
+    if (action) {
+      out.push({ action, button });
+    }
+  }
+  return out;
+}
+
+/**
+ * Send a question for the selected passage, or explain why it could not be sent.
+ *
+ * Shared by the preset buttons and the free-form field: both need the same
+ * failure diagnosis, and duplicating it is how the two paths drift apart.
+ */
+function askAndReport(
+  reader: ReaderInstance,
+  selection: string,
+  question: string,
+  doc: Document | null,
+): void {
+  const delivered = askInSidebar({
+    itemID: reader.itemID,
+    selection,
+    question,
+  });
+  if (!delivered) {
+    // Distinguish "the pane is not open at all" from "a pane for another item
+    // is open" — the fix differs, and a vague message sends the user looking in
+    // the wrong place.
+    const message = anyViewMounted()
+      ? "这个对话属于另一篇文献。请先选中本篇文献，让右侧面板显示出来再试。"
+      : "右侧还没有打开面板。展开右侧栏的信息区，让 AskPage 出现后再试。";
+    new ztoolkit.ProgressWindow("AskPage", { closeOnClick: true })
+      .createLine({ text: message, type: "fail" })
+      .show();
+  }
+  // Dismiss Zotero's own popup so it does not overlap the sidebar.
+  if (doc) {
+    dismissSelectionPopup(doc);
+  }
+}
+
+/**
+ * Wire the free-form question field.
+ *
+ * The preset buttons cover the common cases, but the question a passage raises
+ * is often specific ("隐式正则化与显式正则化的区别"). Typing it here keeps the
+ * selection and the question together, instead of asking about the passage and
+ * then re-explaining what is being asked about in the sidebar.
+ *
+ * Attached after `append()`, on the cloned node: the reader's `cloneInto` does
+ * not carry event listeners across, which is the same constraint the preset
+ * buttons work under.
+ */
+function wireAskForm(
+  row: HTMLElement,
+  reader: ReaderInstance,
+  selection: string,
+): void {
+  const input = row.querySelector(".ha-ask-input") as HTMLInputElement | null;
+  const send = row.querySelector("[data-ha-send]") as HTMLElement | null;
+  if (!input || !send) {
+    return;
+  }
+
+  const submit = () => {
+    const question = (input.value || "").trim();
+    if (!question) {
+      input.focus();
+      return;
+    }
+    // The seed question makes the sidebar send immediately, so one Enter here
+    // is the whole interaction.
+    askAndReport(reader, selection, question, row.ownerDocument);
+  };
+
+  send.addEventListener("click", (e: Event) => {
+    e.preventDefault();
+    e.stopPropagation();
+    submit();
+  });
+
+  input.addEventListener("keydown", (e: Event) => {
+    const key = (e as KeyboardEvent).key;
+    if (key === "Enter" && !(e as KeyboardEvent).shiftKey) {
+      e.preventDefault();
+      e.stopPropagation();
+      submit();
+    } else if (key === "Escape") {
+      e.stopPropagation();
+      input.blur();
+    }
   });
 }
 
