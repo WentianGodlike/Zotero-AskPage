@@ -37,7 +37,9 @@ function join(...parts: string[]): string {
   const sep = first.includes("\\") ? "\\" : "/";
   return parts
     .filter(Boolean)
-    .map((p, i) => (i === 0 ? p.replace(/[\\/]+$/, "") : p.replace(/^[\\/]+|[\\/]+$/g, "")))
+    .map((p, i) =>
+      i === 0 ? p.replace(/[\\/]+$/, "") : p.replace(/^[\\/]+|[\\/]+$/g, ""),
+    )
     .join(sep);
 }
 
@@ -94,11 +96,16 @@ export async function ensureDir(path: string): Promise<boolean> {
     if (exists) {
       return true;
     }
-    await IOUtils.makeDirectory(path, { ignoreExisting: true, createAncestors: true });
+    await IOUtils.makeDirectory(path, {
+      ignoreExisting: true,
+      createAncestors: true,
+    });
     return true;
   } catch (e) {
     Zotero.logError(
-      new Error(`[Highlight Ask] could not create ${path}: ${(e as Error)?.message || e}`),
+      new Error(
+        `[Highlight Ask] could not create ${path}: ${(e as Error)?.message || e}`,
+      ),
     );
     return false;
   }
@@ -114,7 +121,10 @@ export async function writeTextFile(
   contents: string,
 ): Promise<boolean> {
   try {
-    const parent = path.slice(0, Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\")));
+    const parent = path.slice(
+      0,
+      Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\")),
+    );
     if (parent && !(await ensureDir(parent))) {
       return false;
     }
@@ -122,7 +132,9 @@ export async function writeTextFile(
     return true;
   } catch (e) {
     Zotero.logError(
-      new Error(`[Highlight Ask] could not write ${path}: ${(e as Error)?.message || e}`),
+      new Error(
+        `[Highlight Ask] could not write ${path}: ${(e as Error)?.message || e}`,
+      ),
     );
     return false;
   }
@@ -150,7 +162,9 @@ export async function readTextFile(path: string): Promise<string | null> {
     );
   } catch (e) {
     Zotero.logError(
-      new Error(`[Highlight Ask] could not read ${path}: ${(e as Error)?.message || e}`),
+      new Error(
+        `[Highlight Ask] could not read ${path}: ${(e as Error)?.message || e}`,
+      ),
     );
     return null;
   }
@@ -165,7 +179,10 @@ export async function readTextFile(path: string): Promise<string | null> {
  */
 export async function appendLine(path: string, line: string): Promise<boolean> {
   try {
-    const parent = path.slice(0, Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\")));
+    const parent = path.slice(
+      0,
+      Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\")),
+    );
     if (parent && !(await ensureDir(parent))) {
       return false;
     }
@@ -175,7 +192,9 @@ export async function appendLine(path: string, line: string): Promise<boolean> {
     return true;
   } catch (e) {
     // Logging must never break the feature it is logging.
-    Zotero.debug(`[Highlight Ask] append to ${path} failed: ${(e as Error)?.message || e}`);
+    Zotero.debug(
+      `[Highlight Ask] append to ${path} failed: ${(e as Error)?.message || e}`,
+    );
     return false;
   }
 }

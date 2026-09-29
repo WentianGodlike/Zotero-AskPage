@@ -170,11 +170,12 @@ export function validateSettings(draft: SettingsDraft): SettingsValidation {
  * Assignment (not replacement) so it composes with whatever else contributes to
  * the same namespace.
  */
-(globalThis as unknown as Record<string, unknown>).HIGHLIGHT_ASK_API = Object.assign(
-  ((globalThis as unknown as Record<string, any>).HIGHLIGHT_ASK_API ??= {}),
-  {
-    providers: PROVIDERS,
-    getProvider,
-    validateSettings,
-  },
-);
+(globalThis as unknown as Record<string, unknown>).HIGHLIGHT_ASK_API =
+  Object.assign(
+    ((globalThis as unknown as Record<string, any>).HIGHLIGHT_ASK_API ??= {}),
+    {
+      providers: PROVIDERS,
+      getProvider,
+      validateSettings,
+    },
+  );

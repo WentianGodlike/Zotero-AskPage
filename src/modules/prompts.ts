@@ -301,8 +301,9 @@ export function buildUserMessage(ctx: BuildContext): string {
         '\n"""',
     );
   }
-  const siDocs = (Array.isArray(ctx.supportingInfo) ? ctx.supportingInfo : [])
-    .filter((d) => d && typeof d.text === "string" && d.text.trim());
+  const siDocs = (
+    Array.isArray(ctx.supportingInfo) ? ctx.supportingInfo : []
+  ).filter((d) => d && typeof d.text === "string" && d.text.trim());
   if (siDocs.length) {
     for (const si of siDocs) {
       parts.push(
@@ -319,7 +320,10 @@ export function buildUserMessage(ctx: BuildContext): string {
     ctx.nearby.trim() !== String(ctx.selection ?? "").trim()
   ) {
     parts.push(
-      "选中片段附近的原文（用于理解上下文）：\n" + '"""\n' + ctx.nearby + '\n"""',
+      "选中片段附近的原文（用于理解上下文）：\n" +
+        '"""\n' +
+        ctx.nearby +
+        '\n"""',
     );
   }
   parts.push("读者选中的片段：\n" + '"""\n' + ctx.selection + '\n"""');

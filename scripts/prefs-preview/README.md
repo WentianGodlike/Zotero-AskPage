@@ -18,8 +18,12 @@ scripts/prefs-preview/run.sh
 只截取提示词区域时，可在 `preview.html` 上注入：
 
 ```css
-fieldset { display: none !important; }
-fieldset:has(#prompt-fields) { display: block !important; }
+fieldset {
+  display: none !important;
+}
+fieldset:has(#prompt-fields) {
+  display: block !important;
+}
 ```
 
 ## 已知限制

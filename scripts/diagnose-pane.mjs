@@ -90,8 +90,7 @@ const sandbox = {
   },
   document: {
     documentElement: {},
-    getElementById: (id) =>
-      markupInserted ? elements[id] || null : null,
+    getElementById: (id) => (markupInserted ? elements[id] || null : null),
     createElement: () => makeEl("created"),
     createTextNode: () => ({}),
   },
@@ -128,10 +127,12 @@ console.log("\nstep 1: run pane scripts (no markup in the DOM yet)");
 vm.createContext(sandbox);
 try {
   vm.runInContext(dataScript, sandbox, { filename: "providers.data.js" });
-  log("providers.data.js ran; HIGHLIGHT_ASK_PROVIDERS =",
+  log(
+    "providers.data.js ran; HIGHLIGHT_ASK_PROVIDERS =",
     Array.isArray(sandbox.HIGHLIGHT_ASK_PROVIDERS)
       ? `${sandbox.HIGHLIGHT_ASK_PROVIDERS.length} providers`
-      : "NOT DEFINED");
+      : "NOT DEFINED",
+  );
 } catch (e) {
   log("providers.data.js THREW:", e.message);
 }
@@ -180,7 +181,9 @@ if (!errors.length) {
   }
 }
 
-const initialised = events.some((e) => e.startsWith("replaceChildren(provider)"));
+const initialised = events.some((e) =>
+  e.startsWith("replaceChildren(provider)"),
+);
 console.log(
   `\nRESULT: pane ${initialised ? "INITIALISED ✓" : "DID NOT INITIALISE ✗"}\n`,
 );

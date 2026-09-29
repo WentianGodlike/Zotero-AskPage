@@ -134,10 +134,12 @@
       desc.textContent = found.note;
       desc.className = found.vision ? "desc ok" : "desc";
     } else if (!provider.models || !provider.models.length) {
-      desc.textContent = "该服务商没有内置候选，请手动填写模型名，或点「获取模型列表」。";
+      desc.textContent =
+        "该服务商没有内置候选，请手动填写模型名，或点「获取模型列表」。";
       desc.className = "desc";
     } else {
-      desc.textContent = "可从下拉里选，也可以手动填写。标了「视觉」的模型才能看图。";
+      desc.textContent =
+        "可从下拉里选，也可以手动填写。标了「视觉」的模型才能看图。";
       desc.className = "desc";
     }
   }
@@ -204,12 +206,18 @@
 
     if (typedHost && presetHost && typedHost !== presetHost) {
       desc.textContent =
-        "注意：当前服务商是「" + provider.label + "」，但地址指向 " +
-        typedHost + "（该服务商默认是 " + presetHost + "）。" +
+        "注意：当前服务商是「" +
+        provider.label +
+        "」，但地址指向 " +
+        typedHost +
+        "（该服务商默认是 " +
+        presetHost +
+        "）。" +
         "如果用中转/代理，把服务商改成「自定义」更不容易搞混。";
       desc.className = "desc warn";
     } else {
-      desc.textContent = "选择后会填入该服务商的默认地址与模型，下面每一项都可以手动改。";
+      desc.textContent =
+        "选择后会填入该服务商的默认地址与模型，下面每一项都可以手动改。";
       desc.className = "desc";
     }
   }
@@ -439,7 +447,9 @@
    * minimal — the authoritative rules live in the bundle.
    */
   function validateSettingsFallback(draft) {
-    var baseUrl = String(draft.baseUrl || "").trim().replace(/\/+$/, "");
+    var baseUrl = String(draft.baseUrl || "")
+      .trim()
+      .replace(/\/+$/, "");
     var model = String(draft.model || "").trim();
     if (!baseUrl) {
       return { ok: false, error: "API 地址不能为空", warnings: [] };
@@ -653,7 +663,8 @@
       var pretty = detail;
       try {
         var parsed = JSON.parse(detail);
-        pretty = (parsed.error && parsed.error.message) || parsed.message || detail;
+        pretty =
+          (parsed.error && parsed.error.message) || parsed.message || detail;
       } catch (e) {
         /* keep raw */
       }
@@ -736,18 +747,20 @@
    * test/local.test.ts) without a real Zotero preference window.
    */
   /** Clamp a numeric preference to a sane range. */
-function clampNumber(value, min, max, fallback) {
-  const n = Number(value);
-  if (!Number.isFinite(n)) {
-    return fallback;
+  function clampNumber(value, min, max, fallback) {
+    const n = Number(value);
+    if (!Number.isFinite(n)) {
+      return fallback;
+    }
+    return Math.min(max, Math.max(min, Math.round(n)));
   }
-  return Math.min(max, Math.max(min, Math.round(n)));
-}
 
-function whenReady(find, run) {
-    find = find || function () {
-      return $("provider");
-    };
+  function whenReady(find, run) {
+    find =
+      find ||
+      function () {
+        return $("provider");
+      };
     run = run || start;
 
     if (find()) {

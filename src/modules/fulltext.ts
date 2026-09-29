@@ -47,7 +47,11 @@ async function candidateItems(itemID: number): Promise<Zotero.Item[]> {
   const out: Zotero.Item[] = [];
 
   const isPdf = (x: Zotero.Item | null | undefined) =>
-    Boolean(x && x.isAttachment?.() && /pdf/i.test(String(x.attachmentContentType || "")));
+    Boolean(
+      x &&
+      x.isAttachment?.() &&
+      /pdf/i.test(String(x.attachmentContentType || "")),
+    );
 
   if (isPdf(item)) {
     out.push(item);
@@ -117,7 +121,9 @@ export async function getPaperText(
     }
   } catch (e) {
     Zotero.logError(
-      new Error(`[Highlight Ask] full-text lookup failed: ${(e as Error)?.message || e}`),
+      new Error(
+        `[Highlight Ask] full-text lookup failed: ${(e as Error)?.message || e}`,
+      ),
     );
   }
 

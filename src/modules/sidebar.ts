@@ -58,7 +58,8 @@ interface MountedView {
 const views = new Map<number, MountedView>();
 
 /** A question waiting for its section to mount. */
-let pending: { itemID: number; selection: string; question: string } | null = null;
+let pending: { itemID: number; selection: string; question: string } | null =
+  null;
 
 export function registerReaderSidebar(): void {
   try {

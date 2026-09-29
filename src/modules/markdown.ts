@@ -19,7 +19,11 @@ export interface RenderOptions {
    * Returning false (or omitting this) falls back to a monospace chip, which
    * keeps formulas readable even when the math stylesheet is unavailable.
    */
-  renderMath?: (container: HTMLElement, latex: string, display: boolean) => boolean;
+  renderMath?: (
+    container: HTMLElement,
+    latex: string,
+    display: boolean,
+  ) => boolean;
 }
 
 const MATH_PLACEHOLDER_PREFIX = "\u0000MATH";
@@ -80,7 +84,9 @@ export function looksLikeFencedMath(lang: string, code: string): boolean {
       body,
     );
   const looksCody =
-    /=>|\b(function|return|const|let|var|def|class|import|print)\b|[;{]\s*$/.test(body);
+    /=>|\b(function|return|const|let|var|def|class|import|print)\b|[;{]\s*$/.test(
+      body,
+    );
   return looksTex && !looksCody;
 }
 
@@ -243,7 +249,11 @@ export function renderMarkdown(
   return root;
 }
 
-function buildCodeBlock(doc: Document, lang: string, code: string): HTMLElement {
+function buildCodeBlock(
+  doc: Document,
+  lang: string,
+  code: string,
+): HTMLElement {
   const wrap = doc.createElement("div");
   wrap.className = "ha-code";
   if (lang) {
@@ -387,7 +397,11 @@ function appendInline(
   );
 
   // Tokenize: inline code, math placeholders, bold, italic, strike, links.
+  // The placeholder delimiter is U+0000, which is deliberate: no Markdown or
+  // model output can contain it, so a lifted-out formula cannot be re-parsed as
+  // markup. Hence the control characters in the pattern on the next line.
   const pattern =
+    // eslint-disable-next-line no-control-regex
     /(`+)([\s\S]*?)\1|(\u0000MATH(\d+)\u0000)|\*\*\*([^*]+)\*\*\*|\*\*([^*]+)\*\*|__([^_]+)__|(?<!\w)\*([^*\n]+)\*(?!\w)|(?<!\w)_([^_\n]+)_(?!\w)|~~([^~]+)~~|\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g;
 
   let last = 0;
@@ -395,7 +409,9 @@ function appendInline(
 
   while ((m = pattern.exec(protectedText)) !== null) {
     if (m.index > last) {
-      parent.appendChild(doc.createTextNode(protectedText.slice(last, m.index)));
+      parent.appendChild(
+        doc.createTextNode(protectedText.slice(last, m.index)),
+      );
     }
 
     if (m[2] !== undefined && m[1]) {

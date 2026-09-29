@@ -426,7 +426,9 @@ export function renderMathInto(
   }
   container.setAttribute("data-latex", source);
   try {
-    container.appendChild(buildMathNodes(latexToNodes(source, displayMode), doc));
+    container.appendChild(
+      buildMathNodes(latexToNodes(source, displayMode), doc),
+    );
     container.classList.add("ha-math-rendered");
     return true;
   } catch (e) {

@@ -53,7 +53,9 @@ export async function logRequest(entry: RequestLogEntry): Promise<void> {
   try {
     await appendLine(requestLogPath(), JSON.stringify(entry));
   } catch (e) {
-    Zotero.debug(`[Highlight Ask] request log failed: ${(e as Error)?.message || e}`);
+    Zotero.debug(
+      `[Highlight Ask] request log failed: ${(e as Error)?.message || e}`,
+    );
   }
 }
 

@@ -104,10 +104,14 @@ export function looksLikeSupportingFilename(name: string): boolean {
  * filename heuristic is exactly the kind of guess this project keeps getting
  * burned by. `frontMatter` is the first part of the document's extracted text.
  */
-export function isSupportingInfo(
-  attachment: { name: string; frontMatter?: string },
-): { yes: boolean; why: "declared" | "filename" | "no" } {
-  if (attachment.frontMatter && declaresItselfSupportingInfo(attachment.frontMatter)) {
+export function isSupportingInfo(attachment: {
+  name: string;
+  frontMatter?: string;
+}): { yes: boolean; why: "declared" | "filename" | "no" } {
+  if (
+    attachment.frontMatter &&
+    declaresItselfSupportingInfo(attachment.frontMatter)
+  ) {
     return { yes: true, why: "declared" };
   }
   if (looksLikeSupportingFilename(attachment.name)) {
@@ -175,7 +179,9 @@ async function pdfAttachments(itemID: number): Promise<Zotero.Item[]> {
   }
   const isPdf = (x: Zotero.Item | null | undefined) =>
     Boolean(
-      x && x.isAttachment?.() && /pdf/i.test(String(x.attachmentContentType || "")),
+      x &&
+      x.isAttachment?.() &&
+      /pdf/i.test(String(x.attachmentContentType || "")),
     );
 
   if (isPdf(item)) {
@@ -217,7 +223,9 @@ export async function getAnnotations(itemID: number): Promise<Annotation[]> {
           page: anyA.annotationPageLabel
             ? String(anyA.annotationPageLabel)
             : undefined,
-          color: anyA.annotationColor ? String(anyA.annotationColor) : undefined,
+          color: anyA.annotationColor
+            ? String(anyA.annotationColor)
+            : undefined,
         });
       }
     }
@@ -236,7 +244,10 @@ export async function getAnnotations(itemID: number): Promise<Annotation[]> {
  * Notes attached to the paper and to its PDFs are both included, because
  * annotating in the reader commonly creates notes on the attachment.
  */
-export async function getNotes(itemID: number, maxCharsPerNote = 4000): Promise<string[]> {
+export async function getNotes(
+  itemID: number,
+  maxCharsPerNote = 4000,
+): Promise<string[]> {
   const out: string[] = [];
   const seen = new Set<number>();
 
@@ -273,7 +284,9 @@ export async function getNotes(itemID: number, maxCharsPerNote = 4000): Promise<
       await collect(attachment);
     }
   } catch (e) {
-    Zotero.debug(`[Highlight Ask] notes unavailable: ${(e as Error)?.message || e}`);
+    Zotero.debug(
+      `[Highlight Ask] notes unavailable: ${(e as Error)?.message || e}`,
+    );
   }
   return out;
 }
@@ -430,7 +443,9 @@ export async function getSupportingInfo(
       });
     }
   } catch (e) {
-    Zotero.debug(`[Highlight Ask] SI lookup failed: ${(e as Error)?.message || e}`);
+    Zotero.debug(
+      `[Highlight Ask] SI lookup failed: ${(e as Error)?.message || e}`,
+    );
   }
   return out;
 }
@@ -463,7 +478,8 @@ export async function buildContext(
   options: BuildContextOptions,
 ): Promise<ContextBundle> {
   const { itemID, selection } = options;
-  const fullTextRequested = options.fullText ?? Boolean(getPref("sendFullText"));
+  const fullTextRequested =
+    options.fullText ?? Boolean(getPref("sendFullText"));
   const wantAnnotations =
     options.annotations ?? Boolean(getPref("sendAnnotations"));
 
@@ -509,7 +525,9 @@ export async function buildContext(
   }
 
   const retrievalOn =
-    getPref("retrievePassages") && Boolean(paperText?.chars) && Boolean(options.rawText);
+    getPref("retrievePassages") &&
+    Boolean(paperText?.chars) &&
+    Boolean(options.rawText);
   const overBudget = Boolean(paperText?.truncated);
 
   // Decide between sending the document and searching it.

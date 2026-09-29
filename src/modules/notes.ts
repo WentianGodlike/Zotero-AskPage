@@ -89,7 +89,9 @@ export async function loadSessionJson(id: string): Promise<Session | null> {
     return JSON.parse(raw) as Session;
   } catch (e) {
     Zotero.logError(
-      new Error(`[Highlight Ask] corrupt session ${id}: ${(e as Error)?.message || e}`),
+      new Error(
+        `[Highlight Ask] corrupt session ${id}: ${(e as Error)?.message || e}`,
+      ),
     );
     return null;
   }
@@ -103,7 +105,9 @@ export async function loadSessionJson(id: string): Promise<Session | null> {
  * Session ids embed the item id and a timestamp, so the newest is found by
  * sorting the filenames — no need to open every file.
  */
-export async function loadLatestSession(itemID: number): Promise<Session | null> {
+export async function loadLatestSession(
+  itemID: number,
+): Promise<Session | null> {
   if (!getPref("saveToJson")) {
     return null;
   }
@@ -157,9 +161,7 @@ function escapeHtml(text: string): string {
 export function renderSessionHtml(session: Session): string {
   const parts: string[] = [];
   parts.push(`<h1>${NOTE_HEADING}</h1>`);
-  parts.push(
-    `<p><em>${escapeHtml(session.title || "")}</em></p>`,
-  );
+  parts.push(`<p><em>${escapeHtml(session.title || "")}</em></p>`);
 
   session.turns.forEach((turn, index) => {
     parts.push(`<h2>${index + 1}. ${escapeHtml(turn.question)}</h2>`);
@@ -280,7 +282,9 @@ export async function persistSession(session: Session): Promise<SaveOutcome> {
       }
     } catch (e) {
       Zotero.logError(
-        new Error(`[Highlight Ask] note save failed: ${(e as Error)?.message || e}`),
+        new Error(
+          `[Highlight Ask] note save failed: ${(e as Error)?.message || e}`,
+        ),
       );
       outcome.note = "failed";
     }

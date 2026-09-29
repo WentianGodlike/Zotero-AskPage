@@ -51,11 +51,7 @@ const ELEMENT_IDS = elementIdsFromMarkup();
  * @param {number} [opts.maxTicks] Safety bound on the poll loop.
  */
 function runPane(opts = {}) {
-  const {
-    readyAfterTicks = 0,
-    observerFires = false,
-    maxTicks = 130,
-  } = opts;
+  const { readyAfterTicks = 0, observerFires = false, maxTicks = 130 } = opts;
 
   const src = readFileSync(SCRIPT, "utf8");
   const errors = [];
@@ -92,7 +88,9 @@ function runPane(opts = {}) {
     },
   });
 
-  const elements = Object.fromEntries(ELEMENT_IDS.map((id) => [id, makeEl(id)]));
+  const elements = Object.fromEntries(
+    ELEMENT_IDS.map((id) => [id, makeEl(id)]),
+  );
 
   const sandbox = {
     Zotero: {
@@ -170,8 +168,16 @@ export default function register(test) {
   test("initialises when the markup is already present", () => {
     const r = runPane({ readyAfterTicks: 0 });
     try {
-      assert.deepEqual(r.errors, [], `unexpected errors: ${r.errors.join("; ")}`);
-      assert.equal(r.calls.renderedOptions, 1, "provider options were not rendered");
+      assert.deepEqual(
+        r.errors,
+        [],
+        `unexpected errors: ${r.errors.join("; ")}`,
+      );
+      assert.equal(
+        r.calls.renderedOptions,
+        1,
+        "provider options were not rendered",
+      );
       assert.ok(
         r.calls.listenersBound >= 6,
         `only ${r.calls.listenersBound} listeners bound`,
@@ -191,7 +197,11 @@ export default function register(test) {
       // opportunity to initialise and pass for the wrong reason.
       await new Promise((res) => setTimeout(res, 150));
       assert.ok(r.ticks >= 3, `poll loop never ran (ticks=${r.ticks})`);
-      assert.deepEqual(r.errors, [], `unexpected errors: ${r.errors.join("; ")}`);
+      assert.deepEqual(
+        r.errors,
+        [],
+        `unexpected errors: ${r.errors.join("; ")}`,
+      );
       assert.equal(
         r.calls.renderedOptions,
         1,
@@ -237,7 +247,9 @@ export default function register(test) {
         return null;
       },
     });
-    const elements = Object.fromEntries(ELEMENT_IDS.map((id) => [id, makeEl(id)]));
+    const elements = Object.fromEntries(
+      ELEMENT_IDS.map((id) => [id, makeEl(id)]),
+    );
 
     const sandbox = {
       Zotero: {
@@ -280,7 +292,11 @@ export default function register(test) {
     return new Promise((res, rej) => {
       queueMicrotask(() => {
         try {
-          assert.deepEqual(errors, [], `unexpected errors: ${errors.join("; ")}`);
+          assert.deepEqual(
+            errors,
+            [],
+            `unexpected errors: ${errors.join("; ")}`,
+          );
           assert.equal(
             calls.renderedOptions,
             1,
@@ -295,10 +311,17 @@ export default function register(test) {
   });
 
   test("markup never appears: logs a clear error instead of staying silent", async () => {
-    const r = runPane({ readyAfterTicks: null, observerFires: false, maxTicks: 140 });
+    const r = runPane({
+      readyAfterTicks: null,
+      observerFires: false,
+      maxTicks: 140,
+    });
     try {
       await new Promise((res) => setTimeout(res, 200));
-      assert.ok(r.ticks > 100, `poll loop did not run to its limit (${r.ticks})`);
+      assert.ok(
+        r.ticks > 100,
+        `poll loop did not run to its limit (${r.ticks})`,
+      );
       assert.equal(
         r.errors.length,
         1,
@@ -358,11 +381,18 @@ export default function register(test) {
     ]);
 
     const missing = [...looked].filter((id) => !defined.has(id));
-    assert.deepEqual(missing, [], `script looks up ids absent from the markup: ${missing}`);
+    assert.deepEqual(
+      missing,
+      [],
+      `script looks up ids absent from the markup: ${missing}`,
+    );
 
     // Dynamic ids built as "prompt-" + prefKey cannot be checked statically;
     // assert the container those live in is present.
-    assert.ok(defined.has("prompt-fields"), "prompt editor container is missing");
+    assert.ok(
+      defined.has("prompt-fields"),
+      "prompt editor container is missing",
+    );
   });
 
   test("every id in the markup is reachable (no dead fields)", () => {
@@ -370,8 +400,15 @@ export default function register(test) {
     const src = readFileSync(SCRIPT, "utf8");
     const defined = elementIdsFromMarkup();
     const orphans = defined.filter(
-      (id) => !src.includes(`"${id}"`) && !src.includes(`'${id}'`) && !src.includes(`prompt-`),
+      (id) =>
+        !src.includes(`"${id}"`) &&
+        !src.includes(`'${id}'`) &&
+        !src.includes(`prompt-`),
     );
-    assert.deepEqual(orphans, [], `markup defines ids the script never touches: ${orphans}`);
+    assert.deepEqual(
+      orphans,
+      [],
+      `markup defines ids the script never touches: ${orphans}`,
+    );
   });
 }

@@ -87,7 +87,10 @@ export function clampRect(
 ): Rect {
   const left = Math.max(0, Math.min(Math.floor(rect.left), canvasWidth));
   const top = Math.max(0, Math.min(Math.floor(rect.top), canvasHeight));
-  const right = Math.max(left, Math.min(Math.ceil(rect.left + rect.width), canvasWidth));
+  const right = Math.max(
+    left,
+    Math.min(Math.ceil(rect.left + rect.width), canvasWidth),
+  );
   const bottom = Math.max(
     top,
     Math.min(Math.ceil(rect.top + rect.height), canvasHeight),
@@ -157,7 +160,8 @@ export function findPageCanvas(node: Node): HTMLCanvasElement | null {
         ? (node as Element)
         : ((node as Node).parentElement as Element | null);
     for (let hops = 0; hops < 20 && el; hops++) {
-      const wrapper = el.closest?.(".canvasWrapper") || el.querySelector?.(".canvasWrapper");
+      const wrapper =
+        el.closest?.(".canvasWrapper") || el.querySelector?.(".canvasWrapper");
       const found = pickLatest(wrapper ?? null);
       if (found) {
         return found;
@@ -182,7 +186,9 @@ export function findPageCanvas(node: Node): HTMLCanvasElement | null {
     }
     if (plausible.length) {
       // Prefer the largest: the rendered page dwarfs any icon canvas.
-      return plausible.sort((a, b) => b.width * b.height - a.width * a.height)[0];
+      return plausible.sort(
+        (a, b) => b.width * b.height - a.width * a.height,
+      )[0];
     }
   } catch {
     /* nothing usable */
@@ -228,7 +234,8 @@ export function looksLikeFormulaSelection(
   const letters = (trimmed.match(/[A-Za-z]/g) || []).length;
   const digits = (trimmed.match(/[0-9]/g) || []).length;
   const mathMarks = (
-    trimmed.match(/[=+\-−×÷^_(){}\[\]|∑∏∫√≈≤≥≠∂∇αβγδεζηθικλμνξπρστυφχψωΩΔΦ]/g) || []
+    trimmed.match(/[=+\-−×÷^_(){}[\]|∑∏∫√≈≤≥≠∂∇αβγδεζηθικλμνξπρστυφχψωΩΔΦ]/g) ||
+    []
   ).length;
 
   const alphaRatio = letters / trimmed.length;
@@ -309,7 +316,9 @@ export function cropCanvas(
     };
   } catch (e) {
     // A tainted canvas throws here; report rather than crash the ask flow.
-    Zotero.debug(`[Highlight Ask] canvas crop failed: ${(e as Error)?.message || e}`);
+    Zotero.debug(
+      `[Highlight Ask] canvas crop failed: ${(e as Error)?.message || e}`,
+    );
     return null;
   }
 }
@@ -387,7 +396,9 @@ export function captureSelection(
     }
     return cropCanvas(canvas, clamped, scale);
   } catch (e) {
-    Zotero.debug(`[Highlight Ask] capture failed: ${(e as Error)?.message || e}`);
+    Zotero.debug(
+      `[Highlight Ask] capture failed: ${(e as Error)?.message || e}`,
+    );
     return null;
   }
 }
@@ -434,9 +445,7 @@ export interface GeometryFailure {
   step: "selection" | "textLayer" | "canvas" | "layerBox" | "rects" | "clamp";
   detail: string;
 }
-export type GeometryOutcome =
-  | ({ ok: true } & PendingCapture)
-  | GeometryFailure;
+export type GeometryOutcome = ({ ok: true } & PendingCapture) | GeometryFailure;
 
 /**
  * Resolve the crop region for a selection, without rendering it.
@@ -593,8 +602,7 @@ export function findReaderSelection(): {
   source: string;
 } {
   try {
-    const readers: any[] =
-      (Zotero as any).Reader?._readers || [];
+    const readers: any[] = (Zotero as any).Reader?._readers || [];
     for (let i = readers.length - 1; i >= 0; i--) {
       const reader = readers[i];
       try {
@@ -614,9 +622,15 @@ export function findReaderSelection(): {
         /* a reader frame that is gone or not accessible */
       }
     }
-    return { selection: null, source: `no reader selection (${readers.length} readers)` };
+    return {
+      selection: null,
+      source: `no reader selection (${readers.length} readers)`,
+    };
   } catch (e) {
-    return { selection: null, source: `reader lookup failed: ${(e as Error)?.message || e}` };
+    return {
+      selection: null,
+      source: `reader lookup failed: ${(e as Error)?.message || e}`,
+    };
   }
 }
 
@@ -626,7 +640,10 @@ export function findReaderSelection(): {
  * Kept for the case where the reader list is unavailable (an older Zotero, or a
  * host other than the reader). Secondary to `findReaderSelection`.
  */
-export function findAnySelection(win: Window | null, depth = 0): Selection | null {
+export function findAnySelection(
+  win: Window | null,
+  depth = 0,
+): Selection | null {
   if (!win || depth > 6) {
     return null;
   }
@@ -699,7 +716,9 @@ export function searchSelectionDeep(
   }
   seen.add(win);
 
-  const describe = (w: any): { sel: Selection | null; url: string; frames: number } => {
+  const describe = (
+    w: any,
+  ): { sel: Selection | null; url: string; frames: number } => {
     let url = "";
     let frames = 0;
     let sel: Selection | null = null;
@@ -715,7 +734,11 @@ export function searchSelectionDeep(
     }
     try {
       const candidate = w?.getSelection?.();
-      if (candidate && candidate.rangeCount && String(candidate.toString() || "").trim()) {
+      if (
+        candidate &&
+        candidate.rangeCount &&
+        String(candidate.toString() || "").trim()
+      ) {
         sel = candidate as Selection;
       }
     } catch {
@@ -791,7 +814,8 @@ function renderProbes(probes: FrameProbe[]): string {
   }
   return probes
     .map((p) => {
-      const name = p.url.replace(/^resource:\/\/zotero\//, "").slice(0, 34) || "(无 url)";
+      const name =
+        p.url.replace(/^resource:\/\/zotero\//, "").slice(0, 34) || "(无 url)";
       const flags = [
         p.plainSelection ? "选区" : "",
         p.unwrappedSelection ? "选区(wrapped)" : "",
@@ -865,7 +889,9 @@ export async function captureSelectionToFile(
     await IOUtils.write(file, bytes);
     path = file;
   } catch (e) {
-    Zotero.debug(`[Highlight Ask] could not save capture: ${(e as Error)?.message || e}`);
+    Zotero.debug(
+      `[Highlight Ask] could not save capture: ${(e as Error)?.message || e}`,
+    );
   }
   return {
     path,
@@ -1105,9 +1131,11 @@ export function dataUrlBytes(dataUrl: string): number {
  * newest is always the relevant one. Keyed by item id so a change of paper
  * cannot reuse a stale region.
  */
-let pendingCapture:
-  | { itemID?: number; outcome: GeometryOutcome; at: number }
-  | null = null;
+let pendingCapture: {
+  itemID?: number;
+  outcome: GeometryOutcome;
+  at: number;
+} | null = null;
 
 export function stashPendingCapture(
   outcome: GeometryOutcome,
@@ -1116,7 +1144,9 @@ export function stashPendingCapture(
   pendingCapture = { itemID, outcome, at: Date.now() };
   Zotero.debug(
     `[Highlight Ask] capture stashed: ${
-      outcome.ok ? outcome.detail : `FAILED at ${outcome.step}: ${outcome.detail}`
+      outcome.ok
+        ? outcome.detail
+        : `FAILED at ${outcome.step}: ${outcome.detail}`
     }`,
   );
 }
