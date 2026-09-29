@@ -636,8 +636,7 @@
       var base = $("baseUrl").value.trim().replace(/\/+$/, "");
       var payload = {
         model: $("model").value.trim(),
-        messages: [{ role: "user", content: "ping" }],
-        max_tokens: 1,
+        messages: [{ role: "user", content: "Reply with exactly: ok" }],
         stream: false,
       };
       var res = await fetch(base + "/chat/completions", {

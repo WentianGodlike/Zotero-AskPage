@@ -141,6 +141,36 @@ export function makeAbortController(): {
   }
 }
 
+/**
+ * How long each phase of a request may take without progress.
+ *
+ * The sandbox has no AbortController, so a stalled request cannot be cancelled
+ * at the socket level. Without these caps the panel stayed on "生成中…" with
+ * the input disabled indefinitely; closing the reader tab was the only way out.
+ * Timing out cannot close the socket, but it frees the UI and offers retry.
+ */
+const CONNECT_TIMEOUT_MS = 60_000;
+const IDLE_TIMEOUT_MS = 120_000;
+const TOTAL_TIMEOUT_MS = 600_000;
+
+/**
+ * Reject with `message` if `promise` takes longer than `ms`.
+ *
+ * The timer is cleared as soon as the race settles, so a stream of fast chunks
+ * does not accumulate pending timers.
+ */
+export function withTimeout<T>(
+  promise: Promise<T>,
+  ms: number,
+  message: string,
+): Promise<T> {
+  let timer: any;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new DeepSeekError(message, "network")), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
+
 /** Everything needed to talk to the configured endpoint. */
 export interface ResolvedConfig {
   provider: ProviderPresetData;
@@ -154,21 +184,51 @@ export interface ResolvedConfig {
 }
 
 /**
+ * Read a preference as trimmed text.
+ *
+ * A hand-edited pref (about:config) can hold a number, and `.trim()` on a
+ * number throws a bare TypeError that reaches the user as
+ * "e.trim is not a function". The settings pane validates on save; this path
+ * runs on every question, so it defends on its own. `validateSettings` carries
+ * the same defence for the same reason.
+ */
+function prefText(value: unknown): string {
+  if (typeof value === "string") {
+    return value.trim();
+  }
+  // A number is plausible (temperature); anything else counts as unset.
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return String(value);
+  }
+  return "";
+}
+
+/**
  * Read the current provider settings.
  * Throws a user-facing error when the configuration is incomplete.
  */
 export function resolveConfig(): ResolvedConfig {
-  const provider = getProvider(getPref("provider") || "deepseek");
+  const provider = getProvider(prefText(getPref("provider")) || "deepseek");
 
-  const baseUrl = (getPref("baseUrl") || provider.baseUrl || "").trim();
+  const baseUrl = prefText(getPref("baseUrl")) || provider.baseUrl || "";
   if (!baseUrl) {
     throw new DeepSeekError(
       "还没有配置 API 地址。\n\n打开 Zotero → 编辑 → 设置 → Highlight Ask 填写。",
       "no-key",
     );
   }
+  // A missing scheme fails much later, as a vague NetworkError from fetch.
+  // The settings pane checks this on save; the runtime path deserves the same
+  // message because about:config edits bypass the pane entirely.
+  if (!/^https?:\/\//i.test(baseUrl)) {
+    throw new DeepSeekError(
+      `API 地址必须以 http:// 或 https:// 开头（当前是「${baseUrl}」）。\n\n` +
+        "打开 Zotero → 编辑 → 设置 → Highlight Ask 修正。",
+      "no-key",
+    );
+  }
 
-  const model = (getPref("model") || "").trim();
+  const model = prefText(getPref("model"));
   if (!model) {
     throw new DeepSeekError(
       "还没有配置模型名。\n\n打开 Zotero → 编辑 → 设置 → Highlight Ask 填写。",
@@ -176,7 +236,7 @@ export function resolveConfig(): ResolvedConfig {
     );
   }
 
-  const apiKey = (getPref("apiKey") || "").trim();
+  const apiKey = prefText(getPref("apiKey"));
   if (!apiKey && provider.requiresKey) {
     throw new DeepSeekError(
       `还没有配置 ${provider.label} 的 API Key。\n\n` +
@@ -188,8 +248,14 @@ export function resolveConfig(): ResolvedConfig {
 
   // temperature is unsupported (and ignored) by thinking models; only send it
   // when the user has actually set one.
-  const rawTemp = (getPref("temperature") || "").trim();
-  const temperature = rawTemp === "" ? undefined : Number(rawTemp);
+  const rawTemp = prefText(getPref("temperature"));
+  const parsedTemp = rawTemp === "" ? undefined : Number(rawTemp);
+  // Clamp rather than forward: a hand-edited "5" would otherwise buy a 400 the
+  // user cannot act on from the error alone. The pane validates 0–2 on save.
+  const temperature =
+    parsedTemp !== undefined && Number.isFinite(parsedTemp)
+      ? Math.min(2, Math.max(0, parsedTemp))
+      : undefined;
 
   return {
     provider,
@@ -238,7 +304,6 @@ function buildBody(
     model: config.model,
     messages,
     stream: true,
-    stream_options: { include_usage: true },
   };
   if (config.temperature !== undefined) {
     body.temperature = config.temperature;
@@ -247,6 +312,11 @@ function buildBody(
     body.max_tokens = maxTokens;
   }
   if (includeExtras) {
+    // `stream_options` is an OpenAI/DeepSeek extension: some compatible
+    // gateways reject it outright. It only enables usage accounting, so it
+    // belongs with the droppable extras rather than the core body — the
+    // unsupported-parameter retry below then strips it too.
+    body.stream_options = { include_usage: true };
     // User-supplied fields win, so a provider can override anything above.
     Object.assign(body, config.extra);
   }
@@ -258,6 +328,74 @@ function looksLikeUnsupportedParam(text: string): boolean {
   return /unsupported|not supported|unknown (parameter|field|argument)|unrecognized|invalid[_ ]?(parameter|field)|does not support/i.test(
     text,
   );
+}
+
+export interface SseHandlers {
+  /** Called for every parsed `data:` JSON object. */
+  onJson: (json: any) => void;
+}
+
+/**
+ * Incremental parser for an OpenAI-style SSE stream.
+ *
+ * Extracted from `streamChat` so the framing rules can be regression-tested.
+ * A malformed `data:` line once re-buffered itself: the line was already
+ * complete (only `\n`-terminated lines reach the handler), so the outer loop
+ * re-extracted and re-failed on the same line without end — a synchronous
+ * infinite loop that froze the whole UI. A gateway injecting a keep-alive line
+ * was enough to trigger it.
+ *
+ * The accumulator owns only framing. What a JSON object means (deltas,
+ * reasoning, usage, errors) is the caller's business, via `onJson`.
+ */
+export function createSseAccumulator(handlers: SseHandlers) {
+  let buffer = "";
+
+  const handleLine = (line: string) => {
+    const trimmed = line.trim();
+    if (!trimmed || !trimmed.startsWith("data:")) {
+      // Empty lines are event separators; anything else (comments, event
+      // fields) is not part of an OpenAI-style payload.
+      return;
+    }
+    const payload = trimmed.slice(5).trim();
+    if (!payload || payload === "[DONE]") {
+      return;
+    }
+    let json: any;
+    try {
+      json = JSON.parse(payload);
+    } catch {
+      // The line is complete, so nothing can complete it later — rebuffering
+      // would replay it forever. Drop it with a trace: gateways do inject
+      // non-JSON lines (keep-alives, plaintext errors).
+      Zotero.debug(
+        `[Highlight Ask] ignoring non-JSON SSE line: ${payload.slice(0, 200)}`,
+      );
+      return;
+    }
+    handlers.onJson(json);
+  };
+
+  return {
+    /** Feed decoded chunk text; events split across chunks are reassembled. */
+    push(text: string) {
+      buffer += text;
+      let idx: number;
+      while ((idx = buffer.indexOf("\n")) >= 0) {
+        const line = buffer.slice(0, idx);
+        buffer = buffer.slice(idx + 1);
+        handleLine(line);
+      }
+    },
+    /** Flush a trailing line that ended without a newline. */
+    end() {
+      if (buffer.trim()) {
+        handleLine(buffer);
+      }
+      buffer = "";
+    },
+  };
 }
 
 /**
@@ -299,15 +437,19 @@ export async function streamChat(options: ChatOptions): Promise<StreamResult> {
     }
   };
 
-  let res = await send(true);
+  const sendWithTimeout = (includeExtras: boolean): Promise<Response> =>
+    withTimeout(
+      send(includeExtras),
+      CONNECT_TIMEOUT_MS,
+      `连接超时：${CONNECT_TIMEOUT_MS / 1000} 秒内没有收到响应头。\n\n请求地址：${config.endpoint}`,
+    );
 
-  // Some providers reject unknown body fields outright. Rather than making the
-  // user debug their JSON, retry once without the provider-specific extras.
-  if (
-    !res.ok &&
-    (res.status === 400 || res.status === 422) &&
-    Object.keys(config.extra).length > 0
-  ) {
+  let res = await sendWithTimeout(true);
+
+  // Some providers reject unknown body fields outright — the user's extras, or
+  // our own stream_options. Rather than making the user debug their JSON,
+  // probe the error body and retry once with everything optional dropped.
+  if (!res.ok && (res.status === 400 || res.status === 422)) {
     const probe = await res
       .clone()
       .text()
@@ -316,11 +458,17 @@ export async function streamChat(options: ChatOptions): Promise<StreamResult> {
       Zotero.debug(
         "[Highlight Ask] provider rejected extra params; retrying without them",
       );
-      res = await send(false);
+      res = await sendWithTimeout(false);
     }
   }
 
   if (!res.ok) {
+    // Cancelling while the error body was being read used to surface as an
+    // HTTP error with an odd retry button, rather than as the cancellation it
+    // was. The window is narrow but the fix is one line.
+    if (signal?.aborted) {
+      throw new DeepSeekError("已取消", "aborted");
+    }
     let detail = "";
     try {
       detail = await res.text();
@@ -370,67 +518,65 @@ export async function streamChat(options: ChatOptions): Promise<StreamResult> {
 
   const reader = (res.body as any).getReader();
   const decoder = new TextDecoder();
-  let buffer = "";
   let full = "";
   let reasoning = "";
   let usage: StreamResult["usage"];
 
-  const handleLine = (line: string) => {
-    const trimmed = line.trim();
-    if (!trimmed || !trimmed.startsWith("data:")) {
-      return;
-    }
-    const payload = trimmed.slice(5).trim();
-    if (!payload || payload === "[DONE]") {
-      return;
-    }
-    let json: any;
-    try {
-      json = JSON.parse(payload);
-    } catch {
-      // A chunk boundary split the JSON; keep it in the buffer and retry.
-      buffer = line + "\n";
-      return;
-    }
-    const delta: string | undefined = json?.choices?.[0]?.delta?.content;
-    if (delta) {
-      full += delta;
-      onDelta?.(full, delta);
-    }
-    const rdelta: string | undefined =
-      json?.choices?.[0]?.delta?.reasoning_content;
-    if (rdelta) {
-      reasoning += rdelta;
-      onReasoning?.(reasoning, rdelta);
-    }
-    if (json?.usage) {
-      usage = json.usage;
-    }
-  };
+  const sse = createSseAccumulator({
+    onJson: (json: any) => {
+      // Gateways can report an error mid-stream (after a 200). Swallowing it
+      // used to end the request as "模型返回了空内容", sending the user off to
+      // debug the model name instead of the gateway.
+      if (json?.error) {
+        const message =
+          json.error?.message || JSON.stringify(json.error).slice(0, 300);
+        throw new DeepSeekError(`服务端在流中返回错误：${message}`, "http");
+      }
+      const delta: string | undefined = json?.choices?.[0]?.delta?.content;
+      if (delta) {
+        full += delta;
+        onDelta?.(full, delta);
+      }
+      const rdelta: string | undefined =
+        json?.choices?.[0]?.delta?.reasoning_content;
+      if (rdelta) {
+        reasoning += rdelta;
+        onReasoning?.(reasoning, rdelta);
+      }
+      if (json?.usage) {
+        usage = json.usage;
+      }
+    },
+  });
 
+  const readStartedAt = Date.now();
   try {
     for (;;) {
-      const { done, value } = await reader.read();
+      if (Date.now() - readStartedAt > TOTAL_TIMEOUT_MS) {
+        throw new DeepSeekError(
+          `请求超时：整个回答超过 ${TOTAL_TIMEOUT_MS / 60000} 分钟仍未完成，已放弃。` +
+            "\n\n可以点「重试」；若该模型经常如此慢，考虑换一个。",
+          "network",
+        );
+      }
+      const { done, value } = (await withTimeout(
+        reader.read() as Promise<any>,
+        IDLE_TIMEOUT_MS,
+        `请求超时：${IDLE_TIMEOUT_MS / 1000} 秒内没有收到新数据。` +
+          "\n\n可能是网络中断或服务端停滞，可以点「重试」。",
+      )) as any;
       if (done) {
         break;
       }
-      buffer += decoder.decode(value, { stream: true });
-
-      // IMPORTANT: an SSE event can be split across chunk boundaries, so we
-      // only consume complete lines and keep the trailing partial line.
-      let idx: number;
-      while ((idx = buffer.indexOf("\n")) >= 0) {
-        const line = buffer.slice(0, idx);
-        buffer = buffer.slice(idx + 1);
-        handleLine(line);
-      }
+      sse.push(decoder.decode(value, { stream: true }));
     }
-    // Flush whatever is left (stream ended without a trailing newline).
-    if (buffer.trim()) {
-      handleLine(buffer);
-      buffer = "";
-    }
+    // Flush a trailing line that ended without a newline.
+    sse.end();
   } catch (e: any) {
+    // Errors thrown from onJson (mid-stream errors) are already classified.
+    if (e instanceof DeepSeekError) {
+      throw e;
+    }
     if (e?.name === "AbortError") {
       throw new DeepSeekError("已取消", "aborted");
     }
@@ -521,7 +667,19 @@ export async function listModels(): Promise<ModelInfo[]> {
     );
   }
 
-  const json: any = await res.json();
+  let json: any;
+  try {
+    json = await res.json();
+  } catch {
+    // A gateway answering with an HTML error page used to surface as a bare
+    // SyntaxError with no URL or status — the two things that identify it.
+    throw new DeepSeekError(
+      `模型列表不是合法 JSON（HTTP ${res.status}）。\n\n请求地址：${url}\n` +
+        "常见原因：网关返回了 HTML 错误页。",
+      "http",
+      res.status,
+    );
+  }
   const rows = Array.isArray(json?.data)
     ? json.data
     : Array.isArray(json?.models)
