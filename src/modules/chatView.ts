@@ -21,9 +21,15 @@ import {
 import { ensureDir, screenshotDir } from "./storage";
 import { getPref, observePrefs } from "../utils/prefs";
 import { getPaperText, describePaperText, type PaperText } from "./fulltext";
-import { buildContext, bundleSize, type ContextBundle } from "./context";
+import {
+  buildContext,
+  bundleSize,
+  formatAnnotations,
+  type ContextBundle,
+} from "./context";
 import {
   appendTurn,
+  archiveSessionNote,
   loadLatestSession,
   makeSessionId,
   persistSession,
@@ -231,6 +237,14 @@ export function createChatView(options: ChatViewOptions): ChatView {
   let busy = false;
   let destroyed = false;
   let lastAnswer = "";
+  /**
+   * Whether the async boot (paper text + session restore) has finished.
+   *
+   * Questions that arrive earlier are held rather than interleaved: restore
+   * appends to `history` while a first question replaces it wholesale, so the
+   * two orders produced either a lost history or a scrambled timeline.
+   */
+  let booted = false;
   /** Everything needed to re-issue the last request. */
   let lastQuestion: {
     text: string;
@@ -326,6 +340,10 @@ export function createChatView(options: ChatViewOptions): ChatView {
     try {
       if (el.scrollWidth <= el.clientWidth + 1) {
         el.classList.remove("ha-math-overflow");
+        // The formula stopped overflowing (a re-render, or the font made it
+        // narrower): the drawn track would otherwise linger as a full-width
+        // sliver at the bottom.
+        removeMathBar(el);
         return;
       }
       el.classList.add("ha-math-overflow");
@@ -369,10 +387,17 @@ export function createChatView(options: ChatViewOptions): ChatView {
         // Optional: the sandbox may not provide ResizeObserver, in which case
         // the bar simply does not follow font-size changes.
         const Ctor = (doc.defaultView as any)?.ResizeObserver as
-          | (new (cb: () => void) => { observe(target: Element): void })
+          | (new (cb: () => void) => {
+              observe(target: Element): void;
+              disconnect(): void;
+            })
           | undefined;
         const observer = Ctor ? new Ctor(() => syncBar(el)) : null;
         observer?.observe(el);
+        // Kept on the element so it can be released: streaming re-renders
+        // replace whole subtrees, and an observer holding a detached one is
+        // not guaranteed to be collected with it.
+        (el as any)._haRO = observer ?? null;
       } catch {
         /* resize observation is optional */
       }
@@ -384,9 +409,28 @@ export function createChatView(options: ChatViewOptions): ChatView {
     }
   }
 
+  /** Remove the drawn bar, its marker and its resize observer. */
+  function removeMathBar(el: HTMLElement) {
+    try {
+      const ro = (el as any)._haRO as { disconnect?: () => void } | null;
+      ro?.disconnect?.();
+      (el as any)._haRO = null;
+      el.querySelector(".ha-math-bar")?.remove();
+      delete el.dataset.haBar;
+    } catch {
+      /* best effort */
+    }
+  }
+
   /** Position the thumb from the current scroll offset. */
   function syncBar(el: HTMLElement) {
     try {
+      if (!el.isConnected) {
+        // The bubble was replaced (a later delta, or a new question); release
+        // the observer instead of letting it hold a detached subtree alive.
+        removeMathBar(el);
+        return;
+      }
       const bar = el.querySelector(".ha-math-bar") as HTMLElement | null;
       const thumb = el.querySelector(
         ".ha-math-bar-thumb",
@@ -394,6 +438,10 @@ export function createChatView(options: ChatViewOptions): ChatView {
       if (!bar || !thumb) {
         return;
       }
+      // The track is an absolutely positioned child of the scroll container,
+      // so it scrolls with the content; compensate, or it drifts out of view
+      // at exactly the moment the reader scrolls.
+      bar.style.transform = `translateX(${el.scrollLeft}px)`;
       const visible = el.clientWidth / Math.max(1, el.scrollWidth);
       const trackWidth = bar.clientWidth || el.clientWidth;
       const thumbWidth = Math.max(28, Math.round(trackWidth * visible));
@@ -472,6 +520,8 @@ export function createChatView(options: ChatViewOptions): ChatView {
     // Only advertise "stop" when the environment can actually abort.
     const stoppable = next && canAbort();
     sendBtn.textContent = next ? (stoppable ? "停止" : "生成中…") : "发送";
+    // Invalidate any pending flash restore on this button (see flash()).
+    delete sendBtn.dataset.haFlash;
     sendBtn.title = stoppable ? "停止生成" : next ? "正在生成" : "发送";
     sendBtn.classList.toggle("ha-chat-stop", stoppable);
     input.disabled = next;
@@ -501,6 +551,9 @@ export function createChatView(options: ChatViewOptions): ChatView {
     if (wantFullText) {
       bits.push(`全文（${describePaperText(paperText)}）`);
     }
+    if (wantScreenshot && lastImageCount > 0) {
+      bits.push(`截图 ${lastImageCount} 张`);
+    }
     contextLine.textContent = `上下文：${bits.join(" + ")}`;
     // Warn when the full text was cut: the reader should know that the middle
     // of the document is not being sent.
@@ -513,9 +566,6 @@ export function createChatView(options: ChatViewOptions): ChatView {
     }
     // Show the size, because the gap between "selection" and "whole book" is a
     // factor of ~50 in cost and only the reader can judge if it is worth it.
-    if (wantScreenshot && lastImageCount > 0) {
-      bits.push(`截图 ${lastImageCount} 张`);
-    }
     if (archiveWarning) {
       contextLine.textContent += ` · ⚠ ${archiveWarning}`;
       contextLine.classList.add("ha-chat-warn");
@@ -599,7 +649,7 @@ export function createChatView(options: ChatViewOptions): ChatView {
     if (!wantScreenshot) {
       return undefined;
     }
-    const pending = takePendingCapture();
+    const pending = takePendingCapture(itemID);
     if (!pending) {
       return undefined;
     }
@@ -651,7 +701,7 @@ export function createChatView(options: ChatViewOptions): ChatView {
       fullText: bundle.fullText,
       retrieved: bundle.retrieved,
       annotations: bundle.annotations.length
-        ? formatAnnotationsForPrompt(bundle)
+        ? formatAnnotations(bundle.annotations)
         : undefined,
       notes: bundle.notes.length ? bundle.notes : undefined,
       supportingInfo: bundle.supportingInfo.length
@@ -662,20 +712,10 @@ export function createChatView(options: ChatViewOptions): ChatView {
     };
   }
 
-  /** Render the annotation list for the prompt. */
-  function formatAnnotationsForPrompt(bundle: ContextBundle): string {
-    // Imported lazily to keep the module graph flat.
-    return bundle.annotations
-      .slice(0, 40)
-      .map((a) => {
-        const page = a.page ? `（第 ${a.page} 页）` : "";
-        const bits: string[] = [];
-        if (a.text) bits.push(`高亮：${a.text}`);
-        if (a.comment) bits.push(`批注：${a.comment}`);
-        return `- ${page}${bits.join(" / ")}`;
-      })
-      .join("\n");
-  }
+  // The annotation text for prompts comes from context.ts's formatAnnotations.
+  // It used to have a local twin without the character cap, so the "约 N
+  // tokens" estimate — computed with the capped version — could be off by
+  // several times on heavily annotated papers.
 
   /* ---------------------------------------------------------------- */
   /* Paper text and prior conversation                                 */
@@ -731,9 +771,13 @@ export function createChatView(options: ChatViewOptions): ChatView {
             body.parentElement!.appendChild(meta);
           }
         }
-        // Rebuild model context so follow-ups stay coherent.
-        history.push({ role: "user", content: turn.question });
-        history.push({ role: "assistant", content: turn.answer });
+        // Rebuild model context so follow-ups stay coherent. The mirror is
+        // external data; a turn missing either half would send
+        // `content: undefined` into the request.
+        if (turn.question && turn.answer) {
+          history.push({ role: "user", content: turn.question });
+          history.push({ role: "assistant", content: turn.answer });
+        }
       }
 
       lastAnswer =
@@ -762,10 +806,18 @@ export function createChatView(options: ChatViewOptions): ChatView {
     messages: ChatMessage[],
     echoQuestion: string,
     record?: { text: string },
-  ) {
+  ): Promise<boolean> {
     if (busy || destroyed) {
-      return;
+      return false;
     }
+    // Serialise against the boot: the restore pass appends to `history` while
+    // a successful first question replaces it wholesale, so the two orders
+    // raced — one lost the restored history, the other scrambled the timeline.
+    await bootDone;
+    if (busy || destroyed) {
+      return false;
+    }
+    hideHint();
     if (echoQuestion) {
       appendBubble("user", echoQuestion);
     }
@@ -809,6 +861,37 @@ export function createChatView(options: ChatViewOptions): ChatView {
 
     const startedAt = Date.now();
     let firstTokenMs: number | undefined;
+    let partial = "";
+
+    // Rendering the whole answer on every token made long, formula-heavy
+    // answers quadratic: each delta re-ran the markdown parser, re-rendered
+    // every formula, rebuilt the subtree and forced layout. Coalesce to at
+    // most one render per ~100ms, with a trailing render of the final text.
+    let renderTimer: any = null;
+    let lastRenderAt = 0;
+    const renderNow = (text: string) => {
+      if (destroyed) {
+        return;
+      }
+      lastRenderAt = Date.now();
+      answerBody.replaceChildren(renderMarkdown(text, doc, mdOptions));
+      scrollToBottom();
+    };
+    const scheduleRender = (text: string) => {
+      if (renderTimer) {
+        clearTimeout(renderTimer);
+        renderTimer = null;
+      }
+      const since = Date.now() - lastRenderAt;
+      if (since >= 100) {
+        renderNow(text);
+        return;
+      }
+      renderTimer = setTimeout(() => {
+        renderTimer = null;
+        renderNow(partial);
+      }, 100 - since);
+    };
 
     try {
       const result = await streamChat({
@@ -817,12 +900,17 @@ export function createChatView(options: ChatViewOptions): ChatView {
         onDelta: (full) => {
           firstTokenMs ??= Date.now() - startedAt;
           answerBody.classList.remove("ha-chat-streaming");
-          answerBody.replaceChildren(renderMarkdown(full, doc, mdOptions));
-          scrollToBottom();
+          partial = full;
+          scheduleRender(full);
         },
         onReasoning: renderReasoning,
       });
 
+      if (renderTimer) {
+        clearTimeout(renderTimer);
+        renderTimer = null;
+      }
+      renderNow(result.content);
       lastAnswer = result.content;
       history = [...messages, { role: "assistant", content: result.content }];
       lastQuestion = null;
@@ -861,8 +949,22 @@ export function createChatView(options: ChatViewOptions): ChatView {
     } catch (e) {
       const err = e as DeepSeekError;
       if (err?.kind === "aborted") {
+        if (renderTimer) {
+          clearTimeout(renderTimer);
+          renderTimer = null;
+        }
         answerBody.classList.remove("ha-chat-streaming");
-        answerBody.textContent = lastAnswer || "（已停止）";
+        if (partial) {
+          // Keep what already streamed. Overwriting with `lastAnswer` put the
+          // *previous* turn's answer in this bubble, which read as the answer
+          // to the question the reader just cancelled.
+          const mark = doc.createElement("div");
+          mark.className = "ha-chat-meta";
+          mark.textContent = "（已停止，以上为部分回答）";
+          answerBody.appendChild(mark);
+        } else {
+          answerBody.textContent = "（已停止）";
+        }
       } else {
         answerWrap.remove();
         // Keep the failed request so the retry button can re-issue it.
@@ -887,12 +989,17 @@ export function createChatView(options: ChatViewOptions): ChatView {
         errorKind: err?.kind,
       });
     } finally {
+      if (renderTimer) {
+        clearTimeout(renderTimer);
+        renderTimer = null;
+      }
       abort = null;
       setBusy(false);
       if (!destroyed) {
         input.focus();
       }
     }
+    return true;
   }
 
   async function archiveTurn(turn: {
@@ -915,13 +1022,19 @@ export function createChatView(options: ChatViewOptions): ChatView {
       // believed was saved is worth a visible warning; the answer itself is
       // already on screen, so this never blocks.
       archiveWarning =
-        outcome.note === "failed" && !outcome.json
+        outcome.note === "failed" && outcome.json === "failed"
           ? "会话未能存档（笔记与 JSON 均写入失败）"
-          : outcome.note === "failed"
+          : outcome.note === "failed" && outcome.json === "written"
             ? "笔记写入失败，已存 JSON 镜像"
-            : outcome.note === "skipped" && !outcome.json
-              ? "会话未存档（笔记与 JSON 写入均已关闭）"
-              : "";
+            : outcome.note === "failed"
+              ? "笔记写入失败（JSON 镜像未开启）"
+              : outcome.note === "skipped" && outcome.json === "skipped"
+                ? "会话未存档（笔记与 JSON 写入均已关闭）"
+                : outcome.note === "skipped" && outcome.json === "failed"
+                  ? "笔记未开启，且 JSON 镜像写入失败"
+                  : outcome.json === "failed"
+                    ? "JSON 镜像写入失败（笔记已保存）"
+                    : "";
       hooks?.onTurnArchived?.(session);
       paintContextLine();
     } catch (e) {
@@ -941,23 +1054,35 @@ export function createChatView(options: ChatViewOptions): ChatView {
 
   function submit() {
     const text = input.value.trim();
-    if (!text) {
+    if (!text || busy || destroyed) {
       return;
     }
     input.value = "";
     resizeInput();
 
-    if (history.length === 0) {
-      askWithContext((ctx) => {
-        const messages = buildInitialMessages(seedSelection, text, ctx);
+    void (async () => {
+      // The message list is built from `history`, so building it must not
+      // race the boot's restore pass.
+      await bootDone;
+      if (busy || destroyed) {
+        // A question arrived while boot was finishing; put it back rather
+        // than drop it — the input was already cleared.
+        input.value = text;
+        resizeInput();
+        return;
+      }
+      if (history.length === 0) {
+        askWithContext((ctx) => {
+          const messages = buildInitialMessages(seedSelection, text, ctx);
+          history = messages;
+          void ask(messages, text, { text });
+        });
+      } else {
+        const messages = buildFollowUpMessages(history, text);
         history = messages;
         void ask(messages, text, { text });
-      });
-    } else {
-      const messages = buildFollowUpMessages(history, text);
-      history = messages;
-      void ask(messages, text, { text });
-    }
+      }
+    })();
   }
 
   function retry() {
@@ -977,6 +1102,10 @@ export function createChatView(options: ChatViewOptions): ChatView {
   function destroy() {
     // Stop reacting to preference changes: a destroyed view must not keep a
     // closure alive against a detached DOM.
+    if (hintTimer) {
+      clearTimeout(hintTimer);
+      hintTimer = null;
+    }
     try {
       stopObservingPrefs();
     } catch {
@@ -1016,16 +1145,23 @@ export function createChatView(options: ChatViewOptions): ChatView {
   });
 
   clearBtn.addEventListener("click", () => {
-    // Archiving is already done per turn, so this only resets the view.
-    history = [];
-    lastAnswer = "";
-    lastQuestion = null;
-    convo.replaceChildren(empty);
-    convo.appendChild(empty);
-    session.turns = [];
-    session.id = makeSessionId(itemID);
-    session.noteItemID = undefined;
-    hooks?.onStatus?.("已开始新对话");
+    void (async () => {
+      // Mark the old note archived *before* resetting: the next archive would
+      // otherwise find it by heading and replace its whole content with the
+      // new session's first turn. The old conversation is the reader's
+      // record — "清空" starts a new one, it does not delete the old.
+      await archiveSessionNote(session);
+      history = [];
+      lastAnswer = "";
+      lastQuestion = null;
+      convo.replaceChildren(empty);
+      convo.appendChild(empty);
+      hideHint();
+      session.turns = [];
+      session.id = makeSessionId(itemID);
+      session.noteItemID = undefined;
+      hooks?.onStatus?.("已开始新对话");
+    })();
   });
 
   shotBtn.addEventListener("click", () => {
@@ -1036,7 +1172,7 @@ export function createChatView(options: ChatViewOptions): ChatView {
       // which is exactly why the first attempts failed.
       // The stash is the whole story: it either holds a resolved region or the
       // reason one could not be resolved.
-      const outcome = takePendingOutcome();
+      const outcome = takePendingOutcome(itemID);
       if (outcome) {
         if (!outcome.ok) {
           showHint(
@@ -1169,11 +1305,34 @@ export function createChatView(options: ChatViewOptions): ChatView {
     }
   }
 
-  /** Show a short, dismissible note above the input. */
+  let hintTimer: any = null;
+
+  /** Show a short note above the input; it clears itself. */
   function showHint(message: string, kind: "info" | "ok" | "warn" = "warn") {
     hint.textContent = message;
     hint.className = `ha-chat-hint ha-chat-hint-${kind}`;
     hint.hidden = false;
+    // A hint used to stay until the next one replaced it, permanently eating
+    // panel height — and failure traces can run long. Warnings (diagnostics)
+    // outlast informational notes.
+    if (hintTimer) {
+      clearTimeout(hintTimer);
+    }
+    hintTimer = setTimeout(
+      () => {
+        hintTimer = null;
+        hint.hidden = true;
+      },
+      kind === "warn" ? 12_000 : 6_000,
+    );
+  }
+
+  function hideHint() {
+    if (hintTimer) {
+      clearTimeout(hintTimer);
+      hintTimer = null;
+    }
+    hint.hidden = true;
   }
 
   input.addEventListener("input", resizeInput);
@@ -1218,23 +1377,46 @@ export function createChatView(options: ChatViewOptions): ChatView {
     }
   });
 
-  void loadPaperText().then(() => loadPreviousSession());
+  const bootDone: Promise<void> = (async () => {
+    await loadPaperText();
+    await loadPreviousSession();
+  })();
 
-  if (options.manual && seedQuestion) {
-    input.value = seedQuestion;
-    input.focus();
-  } else if (seedQuestion) {
-    askWithContext((ctx) => {
-      const messages = buildInitialMessages(seedSelection, seedQuestion, ctx);
-      history = messages;
-      void ask(messages, seedQuestion, { text: seedQuestion });
-    });
-  }
+  void bootDone.then(() => {
+    booted = true;
+    if (destroyed) {
+      return;
+    }
+    if (options.manual && seedQuestion) {
+      input.value = seedQuestion;
+      input.focus();
+    } else if (seedQuestion) {
+      askWithContext((ctx) => {
+        const messages = buildInitialMessages(seedSelection, seedQuestion, ctx);
+        history = messages;
+        void ask(messages, seedQuestion, { text: seedQuestion });
+      });
+    }
+  });
 
   return {
     ask(selection: string, question: string) {
       seedSelection = (selection || "").trim();
       setQuote(seedSelection);
+      if (busy || destroyed || !booted) {
+        // Deliver as a prefill instead of dropping it: the popup has already
+        // closed, so a silent return looked exactly like the question having
+        // been sent.
+        input.value = question;
+        resizeInput();
+        showHint(
+          busy
+            ? "正在生成上一条回答；这条已填入输入框，完成后按发送。"
+            : "会话正在恢复；这条已填入输入框，稍候按发送。",
+          "info",
+        );
+        return true;
+      }
       if (history.length) {
         const followUp = `${question}\n\n（新选中的片段：\n"""\n${seedSelection}\n"""\n）`;
         // Follow-ups carry the screenshot too. A new formula is selected for
@@ -1256,6 +1438,7 @@ export function createChatView(options: ChatViewOptions): ChatView {
         history = messages;
         void ask(messages, question, { text: question });
       });
+      return true;
     },
     prefill(question: string) {
       input.value = question;
@@ -1289,11 +1472,22 @@ function mkButton(doc: Document, label: string, title: string): HTMLElement {
 }
 
 function flash(btn: HTMLElement, text: string) {
-  const original = btn.dataset.haLabel || btn.textContent || "";
-  btn.dataset.haLabel = original;
+  if (!btn.dataset.haLabel) {
+    btn.dataset.haLabel = btn.textContent || "";
+  }
   btn.textContent = text;
+  // A token per invocation: only the newest flash may restore the label, and
+  // setBusy invalidates by deleting the token. Without this, a request that
+  // finished inside the 1200ms window had its "发送" overwritten by a stale
+  // "生成中…" restore — which then stayed forever.
+  const token = `${Date.now()}-${Math.random()}`;
+  btn.dataset.haFlash = token;
   setTimeout(() => {
-    btn.textContent = original;
+    if (btn.dataset.haFlash === token) {
+      btn.textContent = btn.dataset.haLabel || "";
+      delete btn.dataset.haFlash;
+      delete btn.dataset.haLabel;
+    }
   }, 1200);
 }
 

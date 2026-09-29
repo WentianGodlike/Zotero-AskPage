@@ -175,9 +175,18 @@ function onRenderTextSelectionPopup(event: any): void {
     if (!doc || typeof append !== "function") {
       return;
     }
-    // Only add our row once per popup.
-    if (doc.querySelector(`.${BTN_ROW_CLASS}`)) {
-      return;
+    // Only add our row once per popup. The query is document-wide because the
+    // append target is not exposed directly; a popup left hidden in the DOM by
+    // an earlier selection must not suppress injection into the live one.
+    const existing = doc.querySelector(
+      `.${BTN_ROW_CLASS}`,
+    ) as HTMLElement | null;
+    if (existing) {
+      const popup = existing.closest(".selection-popup") as HTMLElement | null;
+      const stale = popup?.style.display === "none";
+      if (!stale) {
+        return;
+      }
     }
 
     const selection = getSelectionText(reader, params);
@@ -209,8 +218,8 @@ function onRenderTextSelectionPopup(event: any): void {
       // Marked explicitly: `wireButtons` used to match buttons to QUICK_ACTIONS
       // by index, so any extra button in the row would shift every binding.
       btn.dataset.haAction = action.id;
-      // Keep the PDF selection alive while the user moves to click.
-      btn.addEventListener("mousedown", (e: Event) => e.stopPropagation());
+      // No listeners here: `append()` clones through cloneInto, which drops
+      // them. Everything is bound on the mounted clone in wireButtons.
       actions.appendChild(btn);
     }
     row.appendChild(actions);
@@ -234,11 +243,8 @@ function onRenderTextSelectionPopup(event: any): void {
     // row accepts free-form questions, not just the three presets.
     input.placeholder = "或直接提问，回车发送";
     input.title = "输入问题后回车：会带上这段划线一起发给 AI";
-    // Keep the PDF selection alive while typing, and stop the reader from
-    // treating keystrokes as shortcuts.
-    for (const type of ["mousedown", "mouseup", "click", "keydown", "keyup"]) {
-      input.addEventListener(type, (e: Event) => e.stopPropagation());
-    }
+    // No listeners here — they would be dropped by append()'s cloneInto; the
+    // mounted clone gets them in wireAskForm.
     form.appendChild(input);
 
     const send = doc.createElement("button");
@@ -251,14 +257,32 @@ function onRenderTextSelectionPopup(event: any): void {
     row.appendChild(form);
     append(row);
 
-    // Re-find the *cloned* node and attach real handlers there.
-    const mounted =
-      (doc.querySelector(`.${BTN_ROW_CLASS}`) as HTMLElement | null) ?? row;
+    // Re-find the *cloned* node and attach real handlers there. Prefer a row
+    // inside a visible popup: a hidden leftover row would get the handlers
+    // while the live one stayed inert.
+    const mounted = findMountedRow(doc) ?? row;
     wireButtons(mounted, reader, selection);
     wireAskForm(mounted, reader, selection);
   } catch (e) {
     Zotero.logError(e as any);
   }
+}
+
+/**
+ * The mounted row, preferring one inside a visible popup.
+ *
+ * Zotero may leave a closed popup hidden in the document rather than removing
+ * it; the first querySelector match could be that dead row.
+ */
+function findMountedRow(doc: Document): HTMLElement | null {
+  const rows = doc.querySelectorAll(`.${BTN_ROW_CLASS}`);
+  for (const row of rows) {
+    const popup = (row as HTMLElement).closest(".selection-popup");
+    if (!popup || (popup as HTMLElement).style.display !== "none") {
+      return row as HTMLElement;
+    }
+  }
+  return null;
 }
 
 function wireButtons(
@@ -270,6 +294,13 @@ function wireButtons(
     row.querySelectorAll("[data-ha-action]"),
   ) as HTMLElement[];
   for (const pair of matchActionsToButtons(QUICK_ACTIONS, buttons)) {
+    // Keep the PDF selection alive while the user moves to click. This (and
+    // the input's guards below) must live here, on the mounted clone: the
+    // pre-append originals were dropped by cloneInto and these protections
+    // silently did not exist.
+    pair.button.addEventListener("mousedown", (e: Event) =>
+      e.stopPropagation(),
+    );
     pair.button.addEventListener("click", (e: Event) => {
       e.preventDefault();
       e.stopPropagation();
@@ -367,6 +398,13 @@ function wireAskForm(
   const send = row.querySelector("[data-ha-send]") as HTMLElement | null;
   if (!input || !send) {
     return;
+  }
+
+  // Keep the PDF selection alive while typing, and stop the reader from
+  // treating keystrokes as its own shortcuts. Bound here on the mounted clone
+  // (see wireButtons) — before append these were silently discarded.
+  for (const type of ["mousedown", "mouseup", "click", "keydown", "keyup"]) {
+    input.addEventListener(type, (e: Event) => e.stopPropagation());
   }
 
   const submit = () => {

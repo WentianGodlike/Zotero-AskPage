@@ -1,4 +1,5 @@
 import { createChatView, ensureStyles, type ChatView } from "./chatView";
+import { invalidatePaperText } from "./fulltext";
 
 /**
  * Reader sidebar integration.
@@ -89,14 +90,23 @@ export function registerReaderSidebar(): void {
         const ownerDoc = doc as unknown as Document;
         ensureStyles(ownerDoc);
 
-        // Zotero re-renders the section for the same item, so drop any previous
-        // view before mounting a new one — otherwise a streaming request leaks,
-        // still writing into a container that is no longer in the document.
-        const previous = views.get(item.id);
-        if (previous) {
-          previous.view.destroy();
-          views.delete(item.id);
+        // A re-render for a different item can reuse the same body element,
+        // in which case the old view is still "connected" and a connectivity
+        // check cannot detect it. Destroy by container and by item id, then
+        // reap anything else detached — without this, switching items left
+        // zombie views (and their preference observers) behind.
+        for (const [key, mounted] of [...views.entries()]) {
+          if (mounted.container === container || key === item.id) {
+            mounted.view.destroy();
+            views.delete(key);
+          }
         }
+        reapDetachedViews();
+
+        // The pane re-render is the cheapest staleness signal for the cached
+        // paper text: without it, a rebuilt index kept serving the old
+        // extraction until Zotero restarted.
+        invalidatePaperText(item.id);
 
         const view = createChatView({
           container,
