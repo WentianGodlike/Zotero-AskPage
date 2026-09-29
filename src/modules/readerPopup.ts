@@ -1,4 +1,5 @@
 import { QUICK_ACTIONS, resolveTaskPrompt } from "./prompts";
+import { getPref } from "../utils/prefs";
 import { askInSidebar, anyViewMounted } from "./sidebar";
 import {
   captureGeometry,
@@ -31,12 +32,18 @@ const BTN_STYLE_ID = "ha-selection-btn-styles";
  * when the panel opens) so the buttons look right immediately.
  */
 const BTN_CSS = `
-/* The reader constrains this popup to 198px wide (see .selection-popup in
-   reader.css). Forcing a larger width with min-width does not widen it — the
-   content simply overflows and the send button ends up outside the popup. So
-   the row is built to live inside that width: the input takes the whole first
-   line, the button wraps under it.
+/* Widen the popup itself.
+   The reader caps it at 198px (see .selection-popup in reader.css), which is
+   too narrow for a question field. Widening the *content* instead does not
+   work: the cap is on the container, so the content just overflows and the send
+   button ends up outside. The cap therefore has to be raised on the element
+   itself, not fought from inside.
+   The reader measures the popup at runtime and clamps it to the viewport, so a
+   wider box is positioned correctly.
    No backticks in this block: it is inside a template literal. */
+.selection-popup {
+  max-width: var(--ha-popup-width, 320px) !important;
+}
 .${BTN_ROW_CLASS} {
   display: flex;
   flex-direction: column;
@@ -80,10 +87,10 @@ const BTN_CSS = `
   max-width: 100%;
 }
 .${BTN_ROW_CLASS} .ha-ask-input {
-  flex: 1 1 100%;
-  /* No min-width: the parent is capped at 198px, so a floor here would push the
-     button out of the popup instead of widening it. */
-  width: 100%;
+  /* Shares the line with the send button now that the popup is wide enough.
+     A zero minimum width lets it shrink instead of forcing the button to wrap. */
+  flex: 1 1 auto;
+  min-width: 0;
   max-width: 100%;
   box-sizing: border-box;
   font: 12px/1.45 -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
@@ -93,14 +100,10 @@ const BTN_CSS = `
   border-radius: 6px;
   padding: 4px 8px;
   margin: 0;
-  /* Two lines reserved, as requested: the field does not grow while typing and
-     the popup height stays stable. */
-  height: 3.2em;
-  resize: none;
-  overflow-y: auto;
-  /* A textarea carries its own font and margin from the UA sheet. */
-  font-family: inherit;
-  vertical-align: top;
+  /* Single line: an input element cannot hold two, and the popup is now wide
+     enough that a question is readable without wrapping. */
+  height: 2em;
+  box-sizing: border-box;
 }
 .${BTN_ROW_CLASS} .ha-ask-input::placeholder { color: #9aa3b0; }
 .${BTN_ROW_CLASS} .ha-ask-input:focus {
@@ -131,7 +134,14 @@ function ensureButtonStyles(doc: Document) {
   }
   const style = doc.createElement("style");
   style.id = BTN_STYLE_ID;
-  style.textContent = BTN_CSS;
+  // The width is a preference because the right value depends on the screen and
+  // on how long the reader's questions are; the reader measures the popup at
+  // runtime, so changing this is safe.
+  const width = Number(getPref("popupWidth")) || 320;
+  // Built by concatenation: BTN_CSS is itself a template literal, so nesting
+  // backticks here would terminate it early.
+  style.textContent =
+    ":root { --ha-popup-width: " + width + "px; }\n" + BTN_CSS;
   (doc.head || doc.documentElement)?.appendChild(style);
 }
 
@@ -225,11 +235,17 @@ function onRenderTextSelectionPopup(event: any): void {
     const form = doc.createElement("div");
     form.className = "ha-ask-form";
 
-    // A textarea rather than an input: two lines are reserved so a longer
-    // question stays readable while typing, and `rows` keeps the popup height
-    // stable instead of growing with the text.
-    const input = doc.createElement("textarea") as HTMLTextAreaElement;
-    input.rows = 2;
+    // An `input`, deliberately not a `textarea`.
+    //
+    // The reader deletes the selected annotation on Backspace and only exempts
+    // `input`:
+    //   if (event.target.closest('input, .label-popup') || ...) return;
+    // A textarea is absent from that list, so Backspace was handled as "delete
+    // the annotation", which dismissed the popup mid-typing. Matching the
+    // element type the reader expects avoids the problem without intercepting
+    // keys globally.
+    const input = doc.createElement("input");
+    input.type = "text";
     input.className = "ha-ask-input";
     // Explains the feature on hover and doubles as the visible hint that this
     // row accepts free-form questions, not just the three presets.

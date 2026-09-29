@@ -1282,10 +1282,35 @@ test("the popup stylesheet sets no min-width beyond the reader's cap", () => {
   }
 });
 
-test("the question field reserves two lines and does not grow", () => {
+test("the question field is a single-line input, not a textarea", () => {
+  // The reader deletes the selected annotation on Backspace and exempts only
+  // `input`:
+  //   if (event.target.closest('input, .label-popup') || ...) return;
+  // A textarea is missing from that list, so Backspace was treated as "delete
+  // the annotation" and dismissed the popup while typing. The element type is
+  // therefore load-bearing, not cosmetic.
+  const src = readFileSync(
+    new URL("../src/modules/readerPopup.ts", import.meta.url),
+    "utf8",
+  );
+  assert.ok(
+    /createElement\("input"\)/.test(src),
+    "the question field must be an input element",
+  );
+  assert.ok(
+    !/createElement\("textarea"\)/.test(src),
+    "a textarea would be dismissed by the reader's Backspace handling",
+  );
+});
+
+test("the popup raises the reader's width cap on the popup element", () => {
+  // The cap is on the container, so widening the content just overflows it.
   const css = popupCss();
-  assert.ok(/height:\s*3\.2em/.test(css), "expected a two-line height");
-  assert.ok(/resize:\s*none/.test(css), "the field must not be resizable");
+  assert.ok(
+    /\.selection-popup\s*\{[^}]*max-width/.test(css),
+    "the width cap must be raised on the popup element itself",
+  );
+  assert.ok(/--ha-popup-width/.test(css), "expected a configurable width");
 });
 
 test("the question row wraps instead of overflowing", () => {
