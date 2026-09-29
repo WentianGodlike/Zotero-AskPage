@@ -195,7 +195,7 @@ export function promptFields(): PromptField[] {
       label: "角色",
       help: "模型是谁。写得越具体，语气和深度越稳定。留空则用默认。",
       default: DEFAULT_ROLE_PROMPT,
-      rows: 5,
+      rows: 8,
     },
     {
       prefKey: "promptScenario",
@@ -204,14 +204,14 @@ export function promptFields(): PromptField[] {
         "这份插件最关键的提示词：告诉模型 PDF 抽取的文本会有什么毛病、" +
         "公式该怎么处理。改这里比改角色更能影响回答质量。",
       default: DEFAULT_SCENARIO_PROMPT,
-      rows: 24,
+      rows: 80,
     },
     ...QUICK_ACTIONS.map((a) => ({
       prefKey: a.prefKey,
       label: `任务：${a.label}`,
       help: `点击「${a.label}」时实际发送的问题。`,
       default: a.defaultPrompt,
-      rows: 5,
+      rows: a.id === "translate" ? 20 : 8,
     })),
   ];
 }

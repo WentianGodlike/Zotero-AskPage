@@ -68,7 +68,15 @@ def main() -> int:
 {xhtml}
 <script>{shim}</script>
 <script src="providers.data.js"></script>
-<script src="highlightask.js"></script>
+<script src="prompt-fields.js"></script>
+<script>
+  // Stand-in for the plugin bundle's api(). Loading the real bundle here does
+  // not initialise Zotero.<AddonInstance>, so the prompt editors would show the
+  // "definitions unavailable" fallback instead of the fields under test.
+  Zotero.{addon_instance()} = {{
+    api: {{ promptFields: function () {{ return window.__PROMPT_FIELDS || []; }} }},
+  }};
+</script>
 <script src="preferences.js"></script>
 </body></html>
 """
