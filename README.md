@@ -58,6 +58,8 @@ L̃GD [ϕ] = L[ϕ] +
 
 **要求**：Zotero 7 或更高（开发环境为 Zotero 10）。公式截图需要 `deepseek-flash` 或其他支持视觉的模型。
 
+安装包已构建好，**不需要任何命令行工具**。想自己改代码或从源码打包，见文末[开发](#开发)。
+
 ---
 
 ## 使用
@@ -148,7 +150,7 @@ L̃GD [ϕ] = L[ϕ] +
 
 ## 已知限制
 
-- **只在 Zotero 10 / Linux 上验证过。** 未在其他版本或平台测试。构建链本身跨平台（无 shell 依赖、路径处理兼容 Windows），但**未在 Windows / macOS 上实际构建过**
+- **只在 Zotero 10 / Linux 上验证过。** 未在其他版本或平台实际使用过。
 - **检索是词面匹配**，不是语义检索（见上）
 - **`.doc` / `.docx` 格式的 SI 读不到** —— Zotero 不索引 Word 文档（其 `isCachedMIMEType` 只覆盖 PDF、HTML、EPUB）。
 - **SI 判定是启发式的** —— 优先读文档首页的自述（"Supporting Information for..."），读不到文本时才回退到文件名特征。权衡是**精度优先**：漏掉一份 SI 只是少发材料，把正文误判成 SI 会误导模型
@@ -159,21 +161,21 @@ L̃GD [ϕ] = L[ϕ] +
 
 ## 开发
 
+> 这一节只与改代码有关。**安装使用不需要任何构建工具**——下载 `.xpi` 即可。
+
 ```sh
 npm install
-npm run build      # 打包 + 类型检查 + 6 项校验
+npm run build      # 打包 + 类型检查 + 7 项校验
 npm run test:local # 261 项单元测试
 ```
 
-**环境要求**
+构建需要 Node ≥ 22.8（由 `zotero-plugin-scaffold` 决定，已在 `engines` 中声明）
+与 Python ≥ 3.8（校验脚本用，版本不足会自行给出提示）。构建链只用 npm 与
+Python，不依赖 shell 工具，路径处理也兼容 Windows，并有
+`check-cross-platform.py` 在构建时校验这些性质——但**未在 Windows / macOS
+上实际构建过**。
 
-| | 版本 | 说明 |
-| --- | --- | --- |
-| Node | **≥ 22.8** | 由 `zotero-plugin-scaffold` 决定；已在 `engines` 中声明 |
-| Python | **≥ 3.8** | 构建期校验脚本用；脚本会自行检查并给出提示 |
-| 系统 | 不限 | 构建链只用 npm 与 Python，不依赖 shell 工具；路径处理已考虑 Windows 的反斜杠 |
-
-`scripts/render-check/run.sh` 需要 bash 与 Firefox，属于**可选的**开发工具——不影响构建与使用。
+`scripts/render-check/run.sh` 需要 bash 与 Firefox，属于**可选的**开发工具。
 
 `npm run build` 会依次执行：
 
