@@ -1257,6 +1257,55 @@ test("non-SVG elements stay in the HTML namespace", () => {
   }
 });
 
+console.log("\nselection popup: layout constraints");
+// The reader caps this popup at 198px (`.selection-popup` in reader.css). A
+// `min-width` larger than that does not widen the popup — it pushes the send
+// button outside it, which is exactly what happened. These assertions pin the
+// constraint so the tempting fix (make it wider) cannot come back.
+function popupCss(): string {
+  const src = readFileSync(
+    new URL("../src/modules/readerPopup.ts", import.meta.url),
+    "utf8",
+  );
+  const match = src.match(/const BTN_CSS = `([\s\S]*?)`;/);
+  assert.ok(match, "BTN_CSS not found");
+  return match[1].replace(/\$\{BTN_ROW_CLASS\}/g, "ha-selection-actions");
+}
+
+test("the popup stylesheet sets no min-width beyond the reader's cap", () => {
+  const css = popupCss();
+  for (const match of css.matchAll(/min-width:\s*(\d+)px/g)) {
+    assert.ok(
+      Number(match[1]) <= 198,
+      `min-width ${match[1]}px exceeds the reader's 198px cap and will overflow`,
+    );
+  }
+});
+
+test("the question field reserves two lines and does not grow", () => {
+  const css = popupCss();
+  assert.ok(/height:\s*3\.2em/.test(css), "expected a two-line height");
+  assert.ok(/resize:\s*none/.test(css), "the field must not be resizable");
+});
+
+test("the question row wraps instead of overflowing", () => {
+  const css = popupCss();
+  const form = css.slice(css.indexOf(".ha-ask-form"));
+  assert.ok(
+    /flex-wrap:\s*wrap/.test(form.slice(0, 400)),
+    "the form must wrap; without it the button is pushed out",
+  );
+});
+
+test("the input is box-sized so padding cannot overflow the popup", () => {
+  const css = popupCss();
+  const input = css.slice(css.indexOf(".ha-ask-input"));
+  assert.ok(
+    /box-sizing:\s*border-box/.test(input.slice(0, 600)),
+    "expected border-box sizing",
+  );
+});
+
 console.log("\nselection popup: action-to-button matching");
 // The row now also holds a free-form input and its send button, so matching by
 // index would silently bind each preset to the wrong action — the button would
