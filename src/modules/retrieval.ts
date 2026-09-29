@@ -219,6 +219,13 @@ function stem(word: string): string {
     "s",
   ]) {
     if (w.length > suffix.length + 3 && w.endsWith(suffix)) {
+      // Stripping a bare "s" from a word ending in ss/us/is produces a stem
+      // that no longer matches its own plural: "classes" stemmed to "class"
+      // while "class" stemmed to "clas". Skip those endings so the singular
+      // and the plural share a stem.
+      if (suffix === "s" && /(ss|us|is)$/.test(w)) {
+        break;
+      }
       w = w.slice(0, -suffix.length);
       break;
     }

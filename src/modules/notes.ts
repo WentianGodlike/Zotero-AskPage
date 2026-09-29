@@ -43,6 +43,17 @@ export interface Session {
 const NOTE_HEADING = "AskPage 会话";
 
 /**
+ * Heading suffix marking a conversation the reader explicitly ended.
+ *
+ * "清空对话" starts a fresh session, but the old note is the reader's record
+ * and must survive. Without this marker the next archive found the old note
+ * by heading and replaced its whole content with the new session's first
+ * turn — the primary storage was destroyed by the very button whose comment
+ * said archiving was already done.
+ */
+const ARCHIVED_MARK = "（已归档）";
+
+/**
  * Headings this plugin has used before.
  *
  * The note heading is renamed along with the project, but notes written under
@@ -59,6 +70,13 @@ function isOwnHeading(html: string): boolean {
   );
 }
 
+/** True when the note's heading carries the archived marker. */
+function isArchivedNote(html: string): boolean {
+  // Anchored to the h1 so a reader's answer that happens to contain the
+  // phrase cannot archive a note by itself.
+  return new RegExp(`<h1>[^<]*会话${ARCHIVED_MARK}</h1>`).test(html);
+}
+
 /** Stable-ish, readable, and unique enough for one library. */
 export function makeSessionId(itemID: number, at = new Date()): string {
   const stamp = at.toISOString().replace(/[:.]/g, "-").replace("Z", "");
@@ -73,11 +91,51 @@ export function sessionPath(session: Session): string {
 /* JSON mirror                                                         */
 /* ------------------------------------------------------------------ */
 
-export async function saveSessionJson(session: Session): Promise<boolean> {
+export async function saveSessionJson(
+  session: Session,
+): Promise<"written" | "skipped" | "failed"> {
   if (!getPref("saveToJson")) {
-    return false;
+    return "skipped";
   }
-  return writeTextFile(sessionPath(session), JSON.stringify(session, null, 2));
+  // Tri-state, not boolean: "the mirror is off" and "the mirror failed to
+  // write" need different user-facing messages, and conflating them either
+  // cried wolf or hid real failures.
+  return (await writeTextFile(
+    sessionPath(session),
+    JSON.stringify(session, null, 2),
+  ))
+    ? "written"
+    : "failed";
+}
+
+/**
+ * Narrow arbitrary parsed JSON to a Session, or null.
+ *
+ * A mirror file can parse as valid JSON and still not be a session — an
+ * editor saving `{}` or `[1,2]`. Without this check the restore scan threw on
+ * `turns.length` and, because the catch wraps the whole loop, abandoned every
+ * older-but-valid session too. Turns missing their question or answer are
+ * dropped rather than forwarded as `content: undefined` into a request.
+ */
+export function asSession(parsed: unknown): Session | null {
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return null;
+  }
+  const s = parsed as Record<string, unknown>;
+  if (typeof s.id !== "string" || typeof s.itemID !== "number") {
+    return null;
+  }
+  if (!Array.isArray(s.turns)) {
+    return null;
+  }
+  const turns = (s.turns as unknown[]).filter(
+    (t): t is SessionTurn =>
+      Boolean(t) &&
+      typeof t === "object" &&
+      typeof (t as Record<string, unknown>).question === "string" &&
+      typeof (t as Record<string, unknown>).answer === "string",
+  );
+  return { ...(parsed as Session), turns };
 }
 
 export async function loadSessionJson(id: string): Promise<Session | null> {
@@ -86,7 +144,7 @@ export async function loadSessionJson(id: string): Promise<Session | null> {
     return null;
   }
   try {
-    return JSON.parse(raw) as Session;
+    return asSession(JSON.parse(raw));
   } catch (e) {
     Zotero.logError(
       new Error(
@@ -199,7 +257,10 @@ export function renderSessionHtml(session: Session): string {
 /* ------------------------------------------------------------------ */
 
 /**
- * Find the existing conversation note for a paper, if one is already attached.
+ * Find the active conversation note for a paper, if one is attached.
+ *
+ * Archived notes (from a "清空对话" the reader confirmed) are skipped, so a
+ * new session creates its own note instead of appending to a closed one.
  * Returns null when there is none, so the caller can create one.
  */
 export async function findSessionNote(
@@ -214,7 +275,7 @@ export async function findSessionNote(
     for (const id of noteIDs) {
       const note = await Zotero.Items.getAsync(id);
       const html: string = note?.getNote?.() || "";
-      if (isOwnHeading(html)) {
+      if (isOwnHeading(html) && !isArchivedNote(html)) {
         return note;
       }
     }
@@ -226,7 +287,7 @@ export async function findSessionNote(
       for (const id of att?.getNotes?.() || []) {
         const note = await Zotero.Items.getAsync(id);
         const html: string = note?.getNote?.() || "";
-        if (isOwnHeading(html)) {
+        if (isOwnHeading(html) && !isArchivedNote(html)) {
           return note;
         }
       }
@@ -237,9 +298,44 @@ export async function findSessionNote(
   return null;
 }
 
+/**
+ * Mark a session's note as archived, so the next session does not reuse it.
+ *
+ * Called by "清空对话" before the view resets. Never throws: failing to mark
+ * only means the old note may be appended to later, which is the pre-fix
+ * behaviour and recoverable by hand.
+ */
+export async function archiveSessionNote(session: Session): Promise<void> {
+  try {
+    const note =
+      (session.noteItemID
+        ? await Zotero.Items.getAsync(session.noteItemID)
+        : null) || (await findSessionNote(session.itemID));
+    if (!note) {
+      return;
+    }
+    const html = note.getNote?.() || "";
+    if (!isOwnHeading(html) || isArchivedNote(html)) {
+      return;
+    }
+    const marked = html.replace(
+      /(<h1>)([^<]*会话[^<]*)(<\/h1>)/,
+      `$1$2${ARCHIVED_MARK}$3`,
+    );
+    if (marked !== html) {
+      note.setNote(marked);
+      await note.saveTx();
+      Zotero.debug(`[Highlight Ask] archived session note ${note.id}`);
+    }
+  } catch (e) {
+    Zotero.logError(e as Error);
+  }
+}
+
 export interface SaveOutcome {
   note: "written" | "updated" | "skipped" | "failed";
-  json: boolean;
+  /** Distinguishes "mirror off" from "mirror write failed". */
+  json: "written" | "skipped" | "failed";
   noteItemID?: number;
 }
 
@@ -250,7 +346,7 @@ export interface SaveOutcome {
  */
 export async function persistSession(session: Session): Promise<SaveOutcome> {
   session.updatedAt = new Date().toISOString();
-  const outcome: SaveOutcome = { note: "skipped", json: false };
+  const outcome: SaveOutcome = { note: "skipped", json: "skipped" };
 
   if (getPref("saveToNote")) {
     try {

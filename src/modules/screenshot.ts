@@ -1,4 +1,5 @@
-import { ensureDir, pluginRootDir } from "./storage";
+// Nothing is imported from ./storage any more: the only consumer was the
+// removed captureSelectionToFile.
 /**
  * Formula screenshots.
  *
@@ -326,82 +327,12 @@ export function cropCanvas(
 /**
  * Capture the formula a DOM selection covers.
  *
- * Returns null whenever a screenshot is not possible, so the caller can fall
- * back to sending text — a screenshot is an improvement, never a requirement.
+ * Superseded by the deferred path: `captureGeometry` resolves while the
+ * selection is alive and `renderCaptureTiles` renders on demand. The one-shot
+ * version below was removed — it survived the rewrite, was called from
+ * nowhere, and hardcoded a debug directory that ignored the screenshotDir
+ * preference.
  */
-export function captureSelection(
-  selection: Selection | null,
-  opts: { padding?: number; scale?: number } = {},
-): CropResult | null {
-  try {
-    if (!selection || !selection.rangeCount) {
-      return null;
-    }
-    const range = selection.getRangeAt(0);
-    const textLayer = findTextLayer(range.startContainer);
-    const canvas = findPageCanvas(range.startContainer);
-    if (!textLayer || !canvas) {
-      return null;
-    }
-
-    // Union the per-line client rects: a wrapped formula spans several.
-    const layerBox = textLayer.getBoundingClientRect();
-    const lineRects: DOMRect[] = [];
-    const clientRects = range.getClientRects();
-    const count = clientRects ? clientRects.length : 0;
-    for (let i = 0; i < count; i++) {
-      const r = clientRects![i];
-      if (r.width > 1 && r.height > 1) {
-        lineRects.push(r);
-      }
-    }
-    if (!lineRects.length) {
-      return null;
-    }
-
-    const scale = opts.scale ?? 2;
-    const lineHeight = lineRects[0].height || 0;
-
-    const parts: Rect[] = [];
-    for (const r of lineRects) {
-      const inCanvas = scaleRectToCanvas(
-        { left: r.left, top: r.top, width: r.width, height: r.height },
-        {
-          left: layerBox.left,
-          top: layerBox.top,
-          width: layerBox.width,
-          height: layerBox.height,
-        },
-        canvas.width,
-        canvas.height,
-      );
-      const sx = canvas.width / Math.max(1, layerBox.width);
-      parts.push(
-        expandForFormula(
-          inCanvas,
-          lineHeight * (canvas.height / Math.max(1, layerBox.height)),
-          sx,
-          opts.padding ?? 2,
-        ),
-      );
-    }
-
-    const union = unionRects(parts);
-    if (!union) {
-      return null;
-    }
-    const clamped = clampRect(union, canvas.width, canvas.height);
-    if (!isUsableRect(clamped)) {
-      return null;
-    }
-    return cropCanvas(canvas, clamped, scale);
-  } catch (e) {
-    Zotero.debug(
-      `[Highlight Ask] capture failed: ${(e as Error)?.message || e}`,
-    );
-    return null;
-  }
-}
 
 /* ------------------------------------------------------------------ */
 /* Deferred capture                                                    */
@@ -848,59 +779,10 @@ export function locateSelection(win: Window | null): {
 /* Diagnostics                                                         */
 /* ------------------------------------------------------------------ */
 
-export interface DebugCapture {
-  /** File the PNG was written to, for the user to open. */
-  path?: string;
-  dataUrl: string;
-  width: number;
-  height: number;
-  /** What the geometry worked out to, for eyeballing against the image. */
-  detail: string;
-}
-
-/**
- * Capture and save a selection to disk so it can be inspected by eye.
- *
- * This exists because the failure mode of screenshot cropping is a picture of
- * the wrong region, and no amount of unit-testing the arithmetic proves that
- * the *selector* found the right elements in a real reader DOM. Looking at the
- * PNG answers it immediately.
- */
-export async function captureSelectionToFile(
-  selection: Selection | null,
-  opts: { padding?: number; scale?: number } = {},
-): Promise<DebugCapture | null> {
-  const shot = captureSelection(selection, opts);
-  if (!shot) {
-    return null;
-  }
-  let path: string | undefined;
-  try {
-    const dir = `${pluginRootDir()}/debug`;
-    await ensureDir(dir);
-    const stamp = new Date().toISOString().replace(/[:.]/g, "-");
-    const file = `${dir}/capture-${stamp}.png`;
-    const base64 = shot.dataUrl.slice(shot.dataUrl.indexOf(",") + 1);
-    const binary = atob(base64);
-    const bytes = new Uint8Array(binary.length);
-    for (let i = 0; i < binary.length; i++) {
-      bytes[i] = binary.charCodeAt(i);
-    }
-    await IOUtils.write(file, bytes);
-    path = file;
-  } catch (e) {
-    Zotero.debug(
-      `[Highlight Ask] could not save capture: ${(e as Error)?.message || e}`,
-    );
-  }
-  return {
-    path,
-    dataUrl: shot.dataUrl,
-    width: shot.width,
-    height: shot.height,
-    detail: `${shot.width}x${shot.height} px`,
-  };
-}
+// captureSelectionToFile was removed: it was called from nowhere (the
+// screenshot-preview button goes through chatView's saveShot), and it
+// hardcoded <pluginRoot>/debug, bypassing the configurable screenshotDir.
+// Its DebugCapture interface went with it.
 
 /**
  * Describe the geometry without capturing, for the debug log.
@@ -1106,19 +988,9 @@ export function estimateImageTokens(imageCount: number): number {
   return imageCount * 1024;
 }
 
-/**
- * Approximate decoded size of a base64 PNG, in bytes.
- *
- * Used to stay under the provider's per-image limit before sending.
- */
-export function dataUrlBytes(dataUrl: string): number {
-  const comma = dataUrl.indexOf(",");
-  if (comma < 0) {
-    return 0;
-  }
-  const b64 = dataUrl.length - comma - 1;
-  return Math.floor((b64 * 3) / 4);
-}
+// dataUrlBytes was removed: nothing called it outside its own test. The
+// per-image byte limit it was meant to guard is unreachable in practice —
+// tiles are capped by the pixel budget, so a PNG stays far below 32 MiB.
 
 /* ------------------------------------------------------------------ */
 /* Pending-capture stash                                               */
@@ -1133,6 +1005,18 @@ export function dataUrlBytes(dataUrl: string): number {
  */
 let pendingCapture: {
   itemID?: number;
+  /**
+   * The attachment id and its parent item id, when known.
+   *
+   * The reader reports the *attachment* id while the panel usually shows the
+   * *parent*; recording both lets the consumer pass whichever it holds.
+   * Before this existed, the id check could not be used at all — the caller
+   * had no id that matched — so a region stashed on paper A could be attached
+   * to a question about paper B.
+   */
+  owners?: number[];
+  /** Canvas size at stash time; a resize invalidates the cached rects. */
+  canvasSize?: { w: number; h: number };
   outcome: GeometryOutcome;
   at: number;
 } | null = null;
@@ -1141,7 +1025,27 @@ export function stashPendingCapture(
   outcome: GeometryOutcome,
   itemID?: number,
 ): void {
-  pendingCapture = { itemID, outcome, at: Date.now() };
+  const owners: number[] = [];
+  if (typeof itemID === "number") {
+    owners.push(itemID);
+    try {
+      const parent = Zotero.Items.get(itemID)?.parentItemID;
+      if (typeof parent === "number") {
+        owners.push(parent);
+      }
+    } catch {
+      /* a cache miss only means one fewer known owner */
+    }
+  }
+  pendingCapture = {
+    itemID,
+    owners,
+    canvasSize: outcome.ok
+      ? { w: outcome.canvas.width, h: outcome.canvas.height }
+      : undefined,
+    outcome,
+    at: Date.now(),
+  };
   Zotero.debug(
     `[Highlight Ask] capture stashed: ${
       outcome.ok
@@ -1163,10 +1067,30 @@ export function takePendingOutcome(itemID?: number): GeometryOutcome | null {
   }
   if (
     itemID !== undefined &&
-    pendingCapture.itemID !== undefined &&
-    pendingCapture.itemID !== itemID
+    pendingCapture.owners?.length &&
+    !pendingCapture.owners.includes(itemID)
   ) {
+    // Stashed for a different paper. Leave it in place: returning to that
+    // paper may still legitimately use it.
     return null;
+  }
+  // PDF.js reuses and resizes the page canvas when the zoom changes, which
+  // clears the bitmap the cached rects were computed against. A mismatch
+  // means the crop would silently target the wrong region.
+  if (pendingCapture.canvasSize && pendingCapture.outcome.ok) {
+    const { canvas } = pendingCapture.outcome;
+    if (
+      canvas.width !== pendingCapture.canvasSize.w ||
+      canvas.height !== pendingCapture.canvasSize.h
+    ) {
+      Zotero.debug(
+        `[Highlight Ask] discarding stale capture: canvas resized ` +
+          `${pendingCapture.canvasSize.w}x${pendingCapture.canvasSize.h} -> ` +
+          `${canvas.width}x${canvas.height}`,
+      );
+      pendingCapture = null;
+      return null;
+    }
   }
   const { outcome } = pendingCapture;
   pendingCapture = null;
