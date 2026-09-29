@@ -26,7 +26,7 @@
     "lint:check": "prettier --check . && eslint .",
     "lint:fix": "prettier --write . && eslint . --fix",
     "release": "zotero-plugin release",
-    "test": "zotero-plugin test",
+    "test": "npm run test:local",
     "update-deps": "npm update --save",
     "test:local": "esbuild test/local.test.ts --bundle --platform=node --format=esm --outfile=.scaffold/local.test.mjs --log-level=warning && node .scaffold/local.test.mjs",
     "check": "tsc --noEmit && npm run test:local",
@@ -35,7 +35,8 @@
     "check:pane": "python3 scripts/check-pane.py",
     "diagnose": "node scripts/diagnose-pane.mjs",
     "check:package": "python3 scripts/check-package.py",
-    "check:sandbox": "python3 scripts/check-sandbox-globals.py"
+    "check:sandbox": "python3 scripts/check-sandbox-globals.py",
+    "test:zotero": "zotero-plugin test"
   },
   "dependencies": {
     "katex": "^0.18.9",

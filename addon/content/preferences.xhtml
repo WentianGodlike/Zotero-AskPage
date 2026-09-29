@@ -12,16 +12,34 @@
   <head>
     <title>AskPage</title>
     <style>
-      * { box-sizing: border-box; }
+      * {
+        box-sizing: border-box;
+      }
       body {
-        font: 14px/1.6 -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+        font:
+          14px/1.6 -apple-system,
+          "Segoe UI",
+          "PingFang SC",
+          "Microsoft YaHei",
+          sans-serif;
         color: #1f2329;
         margin: 0;
         padding: 16px 18px 28px;
       }
-      h1 { font-size: 17px; color: #2f6feb; margin: 0 0 6px; }
-      .hint { font-size: 12px; color: #6b7280; margin: 0 0 16px; }
-      .hint a, .field a { color: #2f6feb; }
+      h1 {
+        font-size: 17px;
+        color: #2f6feb;
+        margin: 0 0 6px;
+      }
+      .hint {
+        font-size: 12px;
+        color: #6b7280;
+        margin: 0 0 16px;
+      }
+      .hint a,
+      .field a {
+        color: #2f6feb;
+      }
 
       fieldset {
         border: 1px solid #e3e7ee;
@@ -37,7 +55,10 @@
         padding: 0 6px;
       }
 
-      .field { margin-bottom: 14px; max-width: 620px; }
+      .field {
+        margin-bottom: 14px;
+        max-width: 620px;
+      }
       .field > label {
         display: block;
         font-size: 13px;
@@ -45,11 +66,22 @@
         margin-bottom: 4px;
         color: #374151;
       }
-      .field .desc { font-size: 12px; color: #8a93a0; margin-top: 4px; }
-      .field .desc.warn { color: #b45309; }
-      .field .desc.ok { color: #15803d; }
+      .field .desc {
+        font-size: 12px;
+        color: #8a93a0;
+        margin-top: 4px;
+      }
+      .field .desc.warn {
+        color: #b45309;
+      }
+      .field .desc.ok {
+        color: #15803d;
+      }
 
-      input[type="text"], input[type="password"], select, textarea {
+      input[type="text"],
+      input[type="password"],
+      select,
+      textarea {
         width: 100%;
         padding: 7px 10px;
         font: inherit;
@@ -69,20 +101,37 @@
         resize: vertical;
         display: block;
       }
-      input:focus, select:focus, textarea:focus {
+      input:focus,
+      select:focus,
+      textarea:focus {
         outline: 2px solid #c3d0ff;
         border-color: #2f6feb;
       }
-      input:disabled, select:disabled, textarea:disabled {
+      input:disabled,
+      select:disabled,
+      textarea:disabled {
         background: #f4f5f7;
         color: #9aa3b0;
       }
 
-      .row { display: flex; gap: 14px; max-width: 620px; }
-      .row .field { flex: 1; }
+      .row {
+        display: flex;
+        gap: 14px;
+        max-width: 620px;
+      }
+      .row .field {
+        flex: 1;
+      }
 
-      .check { display: flex; align-items: center; gap: 8px; font-size: 13px; }
-      .check input { width: auto; }
+      .check {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 13px;
+      }
+      .check input {
+        width: auto;
+      }
 
       .actions {
         display: flex;
@@ -102,11 +151,25 @@
         color: #374151;
         white-space: nowrap;
       }
-      button:hover { background: #f3f4f6; }
-      button.primary { background: #2f6feb; border-color: #2f6feb; color: #fff; }
-      button.primary:hover { background: #245bd0; }
-      button:disabled { opacity: .55; cursor: default; }
-      button.tiny { padding: 3px 9px; font-size: 12px; }
+      button:hover {
+        background: #f3f4f6;
+      }
+      button.primary {
+        background: #2f6feb;
+        border-color: #2f6feb;
+        color: #fff;
+      }
+      button.primary:hover {
+        background: #245bd0;
+      }
+      button:disabled {
+        opacity: 0.55;
+        cursor: default;
+      }
+      button.tiny {
+        padding: 3px 9px;
+        font-size: 12px;
+      }
 
       .status {
         flex: 1;
@@ -115,8 +178,12 @@
         white-space: pre-wrap;
         word-break: break-word;
       }
-      .status.error { color: #b42318; }
-      .status.busy { color: #6b7280; }
+      .status.error {
+        color: #b42318;
+      }
+      .status.busy {
+        color: #6b7280;
+      }
 
       details.advanced {
         max-width: 620px;
@@ -132,7 +199,9 @@
         color: #374151;
         user-select: none;
       }
-      details.advanced[open] > summary { margin-bottom: 10px; }
+      details.advanced[open] > summary {
+        margin-bottom: 10px;
+      }
     </style>
   </head>
   <body>
@@ -155,15 +224,25 @@
 
       <div class="field">
         <label for="apiKey">API Key</label>
-        <input id="apiKey" type="password" placeholder="sk-..." autocomplete="off" />
+        <input
+          id="apiKey"
+          type="password"
+          placeholder="sk-..."
+          autocomplete="off"
+        />
         <div class="desc" id="key-desc"></div>
       </div>
 
       <div class="field">
         <label for="baseUrl">API 地址</label>
-        <input id="baseUrl" type="text" placeholder="https://api.deepseek.com" />
+        <input
+          id="baseUrl"
+          type="text"
+          placeholder="https://api.deepseek.com"
+        />
         <div class="desc">
-          兼容 OpenAI 格式的地址均可。填到域名或 /v1 即可，会自动补 <code>/chat/completions</code>。
+          兼容 OpenAI 格式的地址均可。填到域名或 /v1 即可，会自动补
+          <code>/chat/completions</code>。
         </div>
       </div>
 
@@ -171,7 +250,9 @@
         <label for="model">模型</label>
         <div style="display: flex; gap: 8px; align-items: center">
           <input id="model" type="text" list="model-list" />
-          <button id="btn-models" class="tiny" type="button">获取模型列表</button>
+          <button id="btn-models" class="tiny" type="button">
+            获取模型列表
+          </button>
         </div>
         <datalist id="model-list"></datalist>
         <div class="desc" id="model-desc"></div>
@@ -195,7 +276,12 @@
 
       <div class="field">
         <label for="temperature">温度</label>
-        <input id="temperature" type="text" placeholder="留空则不发这个参数" style="max-width: 200px" />
+        <input
+          id="temperature"
+          type="text"
+          placeholder="留空则不发这个参数"
+          style="max-width: 200px"
+        />
         <div class="desc">
           0~2，越低越稳定。留空则不发送该参数（思考型模型会忽略它）。
         </div>
@@ -239,7 +325,8 @@
         </div>
         <div class="desc">
           随正文附带的补充材料（PDF / Word / HTML 均可）。
-          <b>正文放不下的推导、参数表、补充图通常都在这里</b>，问公式时很关键。<br />
+          <b>正文放不下的推导、参数表、补充图通常都在这里</b
+          >，问公式时很关键。<br />
           判定方式：优先看文件<b>首页是否自述</b>为 Supporting Information
           （出版商都会印，且不受文件格式影响）；仅当读不到文本时，才回退到
           <code>_si_</code>、<code>-suppmat</code> 这类文件名特征。
@@ -297,7 +384,12 @@
       <div class="field">
         <div class="desc">
           分三层：角色 → 阅读场景 → 任务。留空表示使用内置默认值。
-          <button id="btn-reset-prompts" class="tiny" type="button" style="margin-left: 8px">
+          <button
+            id="btn-reset-prompts"
+            class="tiny"
+            type="button"
+            style="margin-left: 8px"
+          >
             全部恢复默认
           </button>
         </div>
@@ -315,7 +407,9 @@
           </label>
         </div>
         <div class="desc">
-          只记时间、模型、token 数、耗时、是否出错。<b>不记录论文内容和 AI 回答。</b>
+          只记时间、模型、token 数、耗时、是否出错。<b
+            >不记录论文内容和 AI 回答。</b
+          >
         </div>
       </div>
       <div class="field">
@@ -333,12 +427,18 @@
           </label>
         </div>
         <div class="desc">
-          PDF 的文字层会把分式压平、上下标错位、范数竖线丢失，截图是公式唯一可靠的来源。
+          PDF
+          的文字层会把分式压平、上下标错位、范数竖线丢失，截图是公式唯一可靠的来源。
           <br />
-          <b>大段选区也能用</b>：超过约 1300×1300 像素会<b>自动切成多块</b>分别发送，
-          每块都保留原分辨率，而不是被整体缩小。每块最多 1024 tokens，成本显示在状态行。
+          <b>大段选区也能用</b>：超过约 1300×1300
+          像素会<b>自动切成多块</b>分别发送，
+          每块都保留原分辨率，而不是被整体缩小。每块最多 1024
+          tokens，成本显示在状态行。
           <br />
-          仅适用于 <code>deepseek-flash</code>（多模态）；<code>deepseek-v4-pro</code> 不接受图片。
+          仅适用于 <code>deepseek-flash</code>（多模态）；<code
+            >deepseek-v4-pro</code
+          >
+          不接受图片。
         </div>
       </div>
     </details>
@@ -347,11 +447,18 @@
       <summary>调试</summary>
       <div class="field">
         <label for="screenshotDir">截图存储位置</label>
-        <input id="screenshotDir" type="text" placeholder="留空 = 数据目录/highlight-ask/debug" />
+        <input
+          id="screenshotDir"
+          type="text"
+          placeholder="留空 = 数据目录/highlight-ask/debug"
+        />
         <div class="desc">
-          点击「截图预览」时 PNG 的落盘位置。<b>留空</b>用默认目录；填<b>相对路径</b>
-          （如 <code>captures</code>）会放在数据目录的 <code>highlight-ask/</code> 下；
-          填<b>绝对路径</b>（如 <code>/tmp/ha</code>）则直接用它。
+          点击「截图预览」时 PNG 的落盘位置。<b>留空</b>用默认目录；填<b
+            >相对路径</b
+          >
+          （如 <code>captures</code>）会放在数据目录的
+          <code>highlight-ask/</code> 下； 填<b>绝对路径</b>（如
+          <code>/tmp/ha</code>）则直接用它。
         </div>
       </div>
 
@@ -380,12 +487,14 @@
           </label>
         </div>
         <div class="desc">
-          整本书约 40 万 tokens，塞不进上下文。开启后会用<b>你划选的原文</b>在全文里
+          整本书约 40 万
+          tokens，塞不进上下文。开启后会用<b>你划选的原文</b>在全文里
           检索最相关的段落一并发送。<br />
           用选段而不是问题作为检索词：<b>你的提问通常是中文，而文献是英文</b>，
           中文问题检索不到英文正文。<br />
           <b>局限</b>：这是词面匹配（BM25），不是语义检索。问"什么是监督学习"
-          而正文写作 "supervised learning" 时，只有问题里出现了英文术语才检索得到。
+          而正文写作 "supervised learning"
+          时，只有问题里出现了英文术语才检索得到。
         </div>
       </div>
       <div class="field">
@@ -414,7 +523,8 @@
         <textarea id="thinkingParams" rows="4" spellcheck="false"></textarea>
         <div class="desc">
           直接合并进请求体，用来适配各家的思考/推理开关。留空则不附加。<br />
-          DeepSeek 用 <code>{"reasoning_effort":"high"}</code>（可选 low / high / max）。<br />
+          DeepSeek 用 <code>{"reasoning_effort":"high"}</code>（可选 low / high
+          / max）。<br />
           若服务商报「不支持的参数」，插件会自动去掉这些字段重试一次。
         </div>
       </div>

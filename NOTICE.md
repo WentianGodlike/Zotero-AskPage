@@ -8,15 +8,15 @@
 以下文件自上游模板**原样**保留（未修改），版权归 windingwind 及模板贡献者，
 许可为 **AGPL-3.0-or-later**：
 
-| 文件 | 说明 |
-| --- | --- |
-| `addon/bootstrap.js` | 插件引导脚本。上游模板转引自 Zotero 官方的 [Make It Red](https://github.com/zotero/make-it-red) 示例，文件头的署名注释已原样保留 |
-| `src/index.ts` | 插件实例注册 |
-| `src/utils/ztoolkit.ts` | ztoolkit 实例工厂 |
-| `src/utils/locale.ts` | Fluent 本地化封装 |
-| `src/utils/window.ts` | 窗口工具 |
-| `src/utils/prefs.ts` | 偏好项读写封装 |
-| `typings/global.d.ts` | 全局类型声明 |
+| 文件                    | 说明                                                                                                                             |
+| ----------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| `addon/bootstrap.js`    | 插件引导脚本。上游模板转引自 Zotero 官方的 [Make It Red](https://github.com/zotero/make-it-red) 示例，文件头的署名注释已原样保留 |
+| `src/index.ts`          | 插件实例注册                                                                                                                     |
+| `src/utils/ztoolkit.ts` | ztoolkit 实例工厂                                                                                                                |
+| `src/utils/locale.ts`   | Fluent 本地化封装                                                                                                                |
+| `src/utils/window.ts`   | 窗口工具                                                                                                                         |
+| `src/utils/prefs.ts`    | 偏好项读写封装                                                                                                                   |
+| `typings/global.d.ts`   | 全局类型声明                                                                                                                     |
 
 本项目的其余源码为独立编写。由于整体以模板为基础，**本项目整体沿用
 AGPL-3.0-or-later**（见 `LICENSE`）。
@@ -26,10 +26,10 @@ AGPL-3.0-or-later**（见 `LICENSE`）。
 
 ## 2. 运行时依赖
 
-| 组件 | 许可 | 用途 |
-| --- | --- | --- |
-| [KaTeX](https://katex.org/) | **MIT** | 数学排版。库被 bundle 进 `content/scripts/highlightask.js`，样式表输出为 `content/katex.css`。**不打包字体**——复用 Zotero 笔记编辑器自带的那套（见下）。MIT 与 AGPL-3.0 兼容。 |
-| [zotero-plugin-toolkit](https://github.com/windingwind/zotero-plugin-toolkit) | **MIT** | 被 bundle 进 `content/scripts/highlightask.js`。MIT 与 AGPL-3.0 兼容。 |
+| 组件                                                                          | 许可    | 用途                                                                                                                                                                           |
+| ----------------------------------------------------------------------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| [KaTeX](https://katex.org/)                                                   | **MIT** | 数学排版。库被 bundle 进 `content/scripts/highlightask.js`，样式表输出为 `content/katex.css`。**不打包字体**——复用 Zotero 笔记编辑器自带的那套（见下）。MIT 与 AGPL-3.0 兼容。 |
+| [zotero-plugin-toolkit](https://github.com/windingwind/zotero-plugin-toolkit) | **MIT** | 被 bundle 进 `content/scripts/highlightask.js`。MIT 与 AGPL-3.0 兼容。                                                                                                         |
 
 ### 关于 KaTeX 字体
 

@@ -96,13 +96,76 @@ function findBreak(window: string): number {
 
 // Words that carry no retrieval signal in academic prose.
 const STOPWORDS = new Set([
-  "the", "of", "and", "to", "in", "is", "are", "a", "an", "for", "on", "that",
-  "this", "with", "as", "by", "be", "it", "or", "from", "at", "we", "can",
-  "which", "these", "those", "their", "there", "have", "has", "not", "but",
-  "if", "then", "than", "so", "such", "when", "where", "will", "would", "may",
-  "also", "more", "most", "other", "into", "over", "between", "each", "all",
-  "any", "its", "they", "them", "he", "she", "his", "her", "you", "your",
-  "我们的", "这个", "那个", "什么", "怎么", "如何", "为什么", "解释", "翻译",
+  "the",
+  "of",
+  "and",
+  "to",
+  "in",
+  "is",
+  "are",
+  "a",
+  "an",
+  "for",
+  "on",
+  "that",
+  "this",
+  "with",
+  "as",
+  "by",
+  "be",
+  "it",
+  "or",
+  "from",
+  "at",
+  "we",
+  "can",
+  "which",
+  "these",
+  "those",
+  "their",
+  "there",
+  "have",
+  "has",
+  "not",
+  "but",
+  "if",
+  "then",
+  "than",
+  "so",
+  "such",
+  "when",
+  "where",
+  "will",
+  "would",
+  "may",
+  "also",
+  "more",
+  "most",
+  "other",
+  "into",
+  "over",
+  "between",
+  "each",
+  "all",
+  "any",
+  "its",
+  "they",
+  "them",
+  "he",
+  "she",
+  "his",
+  "her",
+  "you",
+  "your",
+  "我们的",
+  "这个",
+  "那个",
+  "什么",
+  "怎么",
+  "如何",
+  "为什么",
+  "解释",
+  "翻译",
 ]);
 
 /**
@@ -145,7 +208,16 @@ export function tokenize(text: string): string[] {
 /** Crude suffix stripping — enough to match plurals and verb forms. */
 function stem(word: string): string {
   let w = word;
-  for (const suffix of ["ations", "ation", "ings", "ing", "ies", "ed", "es", "s"]) {
+  for (const suffix of [
+    "ations",
+    "ation",
+    "ings",
+    "ing",
+    "ies",
+    "ed",
+    "es",
+    "s",
+  ]) {
     if (w.length > suffix.length + 3 && w.endsWith(suffix)) {
       w = w.slice(0, -suffix.length);
       break;
@@ -259,7 +331,10 @@ export function rankChunks(
  * Used to exclude the selection from retrieval results, and to search outward
  * from where the reader is.
  */
-export function locatePassage(text: string, passage: string): { start: number; end: number } | null {
+export function locatePassage(
+  text: string,
+  passage: string,
+): { start: number; end: number } | null {
   const needle = String(passage || "").trim();
   if (needle.length < 16) {
     return null;

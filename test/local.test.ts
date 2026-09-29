@@ -29,7 +29,10 @@ import {
   normalizeSelection,
   matchActionsToButtons,
 } from "../src/modules/readerPopup";
-import { buildInitialMessages, buildFollowUpMessages } from "../src/modules/prompts";
+import {
+  buildInitialMessages,
+  buildFollowUpMessages,
+} from "../src/modules/prompts";
 import {
   buildEndpoint,
   DeepSeekError,
@@ -245,7 +248,9 @@ const render = (md) => renderMarkdown(md, doc).serialize();
 
 console.log("\nnormalizeSelection");
 test("joins hard-wrapped lines into one paragraph", () => {
-  const out = normalizeSelection("the quick brown\nfox jumps over\nthe lazy dog");
+  const out = normalizeSelection(
+    "the quick brown\nfox jumps over\nthe lazy dog",
+  );
   assert.equal(out, "the quick brown fox jumps over the lazy dog");
 });
 
@@ -395,8 +400,15 @@ test("treats model-supplied markup as text, not elements", () => {
     }
   };
   walk(root);
-  assert.ok(!tags.includes("SCRIPT"), `script became an element: ${tags.join(",")}`);
-  assert.deepEqual(tags, ["DIV", "P"], `unexpected element tree: ${tags.join(",")}`);
+  assert.ok(
+    !tags.includes("SCRIPT"),
+    `script became an element: ${tags.join(",")}`,
+  );
+  assert.deepEqual(
+    tags,
+    ["DIV", "P"],
+    `unexpected element tree: ${tags.join(",")}`,
+  );
 });
 
 test("survives an unterminated code fence while streaming", () => {
@@ -440,7 +452,9 @@ test("rejects JSON that is not an object", () => {
 });
 
 test("keeps nested values intact", () => {
-  const out = parseThinkingParams('{"thinking":{"type":"enabled"},"top_p":0.95}');
+  const out = parseThinkingParams(
+    '{"thinking":{"type":"enabled"},"top_p":0.95}',
+  );
   assert.deepEqual(out, { thinking: { type: "enabled" }, top_p: 0.95 });
 });
 
@@ -459,7 +473,11 @@ test("every provider has the required shape", () => {
 
 test("provider keys are unique", () => {
   const keys = HIGHLIGHT_ASK_PROVIDERS.map((p) => p.key);
-  assert.equal(new Set(keys).size, keys.length, `duplicate keys: ${keys.join(",")}`);
+  assert.equal(
+    new Set(keys).size,
+    keys.length,
+    `duplicate keys: ${keys.join(",")}`,
+  );
 });
 
 test("the default pref provider exists in the catalogue", () => {
@@ -535,7 +553,10 @@ test("loading it defines a usable global catalogue", () => {
   // is the pane scope.
   new Function("globalThis", src)(sandbox);
   const list = sandbox.HIGHLIGHT_ASK_PROVIDERS;
-  assert.ok(Array.isArray(list), "HIGHLIGHT_ASK_PROVIDERS global was not defined");
+  assert.ok(
+    Array.isArray(list),
+    "HIGHLIGHT_ASK_PROVIDERS global was not defined",
+  );
   assert.equal(
     list.length,
     HIGHLIGHT_ASK_PROVIDERS.length,
@@ -816,7 +837,10 @@ test("an unknown provider key falls back instead of crashing", () => {
   d.providerKey = "does-not-exist";
   const r = validateSettings(d);
   // Falls back to the first catalogue entry (deepseek), which needs a key.
-  assert.equal(getProvider("does-not-exist").key, HIGHLIGHT_ASK_PROVIDERS[0].key);
+  assert.equal(
+    getProvider("does-not-exist").key,
+    HIGHLIGHT_ASK_PROVIDERS[0].key,
+  );
   assert.equal(r.ok, true, r.error);
   assert.equal(r.value.providerKey, HIGHLIGHT_ASK_PROVIDERS[0].key);
 });
@@ -824,8 +848,19 @@ test("an unknown provider key falls back instead of crashing", () => {
 test("never throws, whatever it is handed", () => {
   const nasty = [
     {},
-    { baseUrl: null, model: null, apiKey: null, thinkingParamsText: null, temperatureText: null },
-    { baseUrl: "http://x", model: "m", thinkingParamsText: "null", temperatureText: "0" },
+    {
+      baseUrl: null,
+      model: null,
+      apiKey: null,
+      thinkingParamsText: null,
+      temperatureText: null,
+    },
+    {
+      baseUrl: "http://x",
+      model: "m",
+      thinkingParamsText: "null",
+      temperatureText: "0",
+    },
   ];
   for (const d of nasty) {
     validateSettings(d as any);
@@ -868,7 +903,10 @@ test("volatile content goes in the user message, not the system message", () => 
     "FULLTEXT_MARKER",
     "TITLE_MARKER",
   ]) {
-    assert.ok(!system.includes(marker), `${marker} leaked into the system prompt`);
+    assert.ok(
+      !system.includes(marker),
+      `${marker} leaked into the system prompt`,
+    );
     assert.ok(user.includes(marker), `${marker} missing from the user message`);
   }
 });
@@ -925,7 +963,12 @@ test("says only names, abbreviations and symbols keep their original form", () =
 
 test("demands a clean result with no added commentary", () => {
   assert.match(DEFAULT_TRANSLATE_TASK, /只输出译文本身/);
-  for (const forbidden of ["不要解释", "不要总结", "不要补充背景", "不要评论"]) {
+  for (const forbidden of [
+    "不要解释",
+    "不要总结",
+    "不要补充背景",
+    "不要评论",
+  ]) {
     assert.ok(
       DEFAULT_TRANSLATE_TASK.includes(forbidden),
       `missing constraint: ${forbidden}`,
@@ -951,10 +994,26 @@ test("the scenario layer also forbids glossing and enforces the task", () => {
 test("the scenario layer pins down the maths delimiters", () => {
   // Models otherwise drift to code fences or \( \) forms, which then do not
   // render. The renderer tolerates fences, but the prompt should not rely on it.
-  assert.match(DEFAULT_SCENARIO_PROMPT, /行内用 \$\.\.\.\$/, "inline rule missing");
-  assert.match(DEFAULT_SCENARIO_PROMPT, /\$\$\.\.\.\$\$/, "display rule missing");
-  assert.match(DEFAULT_SCENARIO_PROMPT, /不要.*放进代码块/, "fence ban missing");
-  assert.match(DEFAULT_SCENARIO_PROMPT, /只认 \$ 符号/, "single-delimiter rule missing");
+  assert.match(
+    DEFAULT_SCENARIO_PROMPT,
+    /行内用 \$\.\.\.\$/,
+    "inline rule missing",
+  );
+  assert.match(
+    DEFAULT_SCENARIO_PROMPT,
+    /\$\$\.\.\.\$\$/,
+    "display rule missing",
+  );
+  assert.match(
+    DEFAULT_SCENARIO_PROMPT,
+    /不要.*放进代码块/,
+    "fence ban missing",
+  );
+  assert.match(
+    DEFAULT_SCENARIO_PROMPT,
+    /只认 \$ 符号/,
+    "single-delimiter rule missing",
+  );
 });
 
 test("the translate task also forbids code fences around maths", () => {
@@ -1031,7 +1090,10 @@ test("appendTurn does not mutate the original session", () => {
 
 test("appendTurn records the update time", () => {
   const s = makeSession(1);
-  const next = appendTurn(s, makeTurn("q", "a", { ts: "2026-01-02T03:04:05.000Z" }));
+  const next = appendTurn(
+    s,
+    makeTurn("q", "a", { ts: "2026-01-02T03:04:05.000Z" }),
+  );
   assert.equal(next.updatedAt, "2026-01-02T03:04:05.000Z");
 });
 
@@ -1051,7 +1113,9 @@ test("sessionChars counts question and answer text", () => {
 
 test("renderSessionHtml escapes HTML from the paper and the model", () => {
   const s = makeSession(1);
-  s.turns.push(makeTurn("<img src=x onerror=alert(1)>", "<script>bad()</script>"));
+  s.turns.push(
+    makeTurn("<img src=x onerror=alert(1)>", "<script>bad()</script>"),
+  );
   const html = renderSessionHtml(s);
   assert.ok(!html.includes("<script>"), "model output was not escaped");
   assert.ok(!html.includes("<img"), "selection was not escaped");
@@ -1158,7 +1222,11 @@ console.log("\nKaTeX SVG delimiters need the SVG namespace");
 // where the browser renders nothing: the norm bars vanish while the rest of the
 // formula looks correct.
 function buildWithRecorder(latex: string, display = false) {
-  const made: Array<{ tag: string; ns: string; attrs: Record<string, string> }> = [];
+  const made: Array<{
+    tag: string;
+    ns: string;
+    attrs: Record<string, string>;
+  }> = [];
   const make = (tag: string, ns: string) => ({
     tag,
     ns,
@@ -1486,7 +1554,11 @@ test("dangerous URL schemes are refused", () => {
     "data:text/html,x",
     "not a url",
   ]) {
-    const result = validateSettings({ ...DRAFT, providerKey: "custom", baseUrl } as any);
+    const result = validateSettings({
+      ...DRAFT,
+      providerKey: "custom",
+      baseUrl,
+    } as any);
     assert.equal(result.ok, false, `${baseUrl} should be refused`);
   }
 });
@@ -1532,7 +1604,11 @@ console.log("\nrobustness: malformed context and budgets");
 // reach the model as the literal string "undefined".
 test("a non-string annotations value does not throw", () => {
   assert.doesNotThrow(() =>
-    buildUserMessage({ selection: "x", question: "q", annotations: 999 as any }),
+    buildUserMessage({
+      selection: "x",
+      question: "q",
+      annotations: 999 as any,
+    }),
   );
 });
 
@@ -1551,7 +1627,11 @@ test("supporting info entries without text are skipped", () => {
   const out = buildUserMessage({
     selection: "x",
     question: "q",
-    supportingInfo: [{}, { name: null, text: null }, { name: "SI.pdf", text: "body" }] as any,
+    supportingInfo: [
+      {},
+      { name: null, text: null },
+      { name: "SI.pdf", text: "body" },
+    ] as any,
   });
   assert.ok(out.includes("SI.pdf"), out);
   assert.ok(out.includes("body"), out);
@@ -1686,7 +1766,8 @@ test("honours topK", () => {
 });
 
 test("can exclude the passage already being sent", () => {
-  const target = "Chapter 1. Supervised learning maps inputs to outputs using labelled training data.";
+  const target =
+    "Chapter 1. Supervised learning maps inputs to outputs using labelled training data.";
   const range = locatePassage(BOOK, target)!;
   const hits = rankChunks(BOOK, target, { excludeRange: range });
   for (const hit of hits) {
@@ -1728,11 +1809,12 @@ test("formatting returns passages in document order, not relevance order", () =>
     topK: 4,
   });
   const out = formatRetrieved(hits, BOOK.length);
-  const positions = [...out.matchAll(/全文约 (\d+)% 处/g)].map((m) => Number(m[1]));
+  const positions = [...out.matchAll(/全文约 (\d+)% 处/g)].map((m) =>
+    Number(m[1]),
+  );
   const sorted = [...positions].sort((a, b) => a - b);
   assert.deepEqual(positions, sorted, positions.join(","));
 });
-
 
 // A screenshot used to work only for the first question of a session: the first
 // path attached it, and the follow-up path — which never called the assembler —
@@ -1844,7 +1926,9 @@ test("a display formula on its own line renders as display", () => {
 
 test("a display formula inside a paragraph still renders as display", () => {
   // This is the case that was broken: the paragraph path always passed false.
-  const calls = renderCalls("where the result is $$\\prod_{i=1}^{I} x_i$$ as shown.");
+  const calls = renderCalls(
+    "where the result is $$\\prod_{i=1}^{I} x_i$$ as shown.",
+  );
   const display = calls.filter((c) => c.display);
   assert.equal(
     display.length,
@@ -1862,7 +1946,9 @@ test("inline maths stays inline", () => {
 });
 
 test("inline and display maths in one line are distinguished", () => {
-  const calls = renderCalls("Let $\\phi$ be the parameter: $$p(\\phi) = \\frac{a}{b}$$ done.");
+  const calls = renderCalls(
+    "Let $\\phi$ be the parameter: $$p(\\phi) = \\frac{a}{b}$$ done.",
+  );
   assert.equal(calls.length, 2);
   assert.equal(calls[0].display, false);
   assert.equal(calls[1].display, true);
@@ -1902,7 +1988,11 @@ test("tiles cover the whole rectangle", () => {
   const tiles = planTiles(rect, 2);
   assert.equal(tiles[0].top, rect.top, "first tile must start at the top");
   const last = tiles[tiles.length - 1];
-  assert.equal(last.top + last.height, rect.top + rect.height, "must reach the bottom");
+  assert.equal(
+    last.top + last.height,
+    rect.top + rect.height,
+    "must reach the bottom",
+  );
 });
 
 test("consecutive tiles overlap so a formula on a boundary stays whole", () => {
@@ -1911,7 +2001,10 @@ test("consecutive tiles overlap so a formula on a boundary stays whole", () => {
   assert.ok(tiles.length > 1);
   for (let i = 1; i < tiles.length; i++) {
     const prevEnd = tiles[i - 1].top + tiles[i - 1].height;
-    assert.ok(tiles[i].top < prevEnd, `tile ${i} does not overlap the previous one`);
+    assert.ok(
+      tiles[i].top < prevEnd,
+      `tile ${i} does not overlap the previous one`,
+    );
   }
 });
 
@@ -1947,7 +2040,10 @@ test("a wide selection is scaled by the side limit, then split", () => {
   // worse. So the scale lands on 8192/6000 and the height is divided.
   const rect = { left: 0, top: 0, width: 6000, height: 200 };
   const scale = effectiveTileScale(rect, 2);
-  assert.ok(Math.abs(scale - MAX_IMAGE_DIMENSION / 6000) < 1e-9, `got ${scale}`);
+  assert.ok(
+    Math.abs(scale - MAX_IMAGE_DIMENSION / 6000) < 1e-9,
+    `got ${scale}`,
+  );
   assert.ok(planTiles(rect, 2).length > 1);
 });
 
@@ -1991,7 +2087,8 @@ console.log("\nlooksLikeFormulaSelection");
 // Cases below are the real strings from a saved session, not invented ones.
 test("accepts a single extracted formula", () => {
   // Verbatim from the text layer of Understanding Deep Learning, eq. 9.11.
-  const text = "P r(φ|{xi, yi}) = ∏I i=1 P r(yi|xi, φ)P r(φ) ∫ ∏I i=1 P r(yi|xi, φ)P r(φ)dφ ,";
+  const text =
+    "P r(φ|{xi, yi}) = ∏I i=1 P r(yi|xi, φ)P r(φ) ∫ ∏I i=1 P r(yi|xi, φ)P r(φ)dφ ,";
   assert.equal(
     looksLikeFormulaSelection(text, { width: 992, height: 120 }),
     true,
@@ -2000,7 +2097,10 @@ test("accepts a single extracted formula", () => {
 
 test("accepts a short equation with a norm", () => {
   const text = "L̃GD [ϕ] = L[ϕ] + α ∂L 4 ∂ϕ 2 .";
-  assert.equal(looksLikeFormulaSelection(text, { width: 700, height: 110 }), true);
+  assert.equal(
+    looksLikeFormulaSelection(text, { width: 700, height: 110 }),
+    true,
+  );
 });
 
 test("rejects the long prose selection that contained formulas", () => {
@@ -2032,12 +2132,21 @@ test("rejects plain prose", () => {
 test("rejects a symbol-dense but multi-line block", () => {
   // Symbol ratio is high, but it spans many lines: not a single formula.
   const text = "a = b + c\nd = e - f\ng = h * i\nj = k / l";
-  assert.equal(looksLikeFormulaSelection(text, { width: 300, height: 400 }), false);
+  assert.equal(
+    looksLikeFormulaSelection(text, { width: 300, height: 400 }),
+    false,
+  );
 });
 
 test("rejects empty text", () => {
-  assert.equal(looksLikeFormulaSelection("", { width: 100, height: 20 }), false);
-  assert.equal(looksLikeFormulaSelection("   ", { width: 100, height: 20 }), false);
+  assert.equal(
+    looksLikeFormulaSelection("", { width: 100, height: 20 }),
+    false,
+  );
+  assert.equal(
+    looksLikeFormulaSelection("   ", { width: 100, height: 20 }),
+    false,
+  );
 });
 
 test("handles a zero-width rect without dividing by zero", () => {
@@ -2143,13 +2252,23 @@ test("degenerate layer box yields an empty rect instead of Infinity", () => {
 
 test("grows a tight selection to the full line height", () => {
   // A selection 6px tall in a 20px line box should gain 7px on each side.
-  const out = expandForFormula({ left: 10, top: 10, width: 50, height: 6 }, 20, 1, 2);
+  const out = expandForFormula(
+    { left: 10, top: 10, width: 50, height: 6 },
+    20,
+    1,
+    2,
+  );
   assert.equal(out.top, 10 - 7 - 2);
   assert.equal(out.height, 6 + 14 + 4);
 });
 
 test("never shrinks a selection taller than its line height", () => {
-  const out = expandForFormula({ left: 0, top: 0, width: 10, height: 40 }, 20, 1, 0);
+  const out = expandForFormula(
+    { left: 0, top: 0, width: 10, height: 40 },
+    20,
+    1,
+    0,
+  );
   assert.equal(out.height, 40);
   assert.equal(out.top, 0);
 });
@@ -2168,7 +2287,11 @@ test("clamps to the canvas and rounds to whole pixels", () => {
 });
 
 test("clamping an off-canvas rect produces nothing usable", () => {
-  const out = clampRect({ left: 500, top: 500, width: 50, height: 50 }, 100, 100);
+  const out = clampRect(
+    { left: 500, top: 500, width: 50, height: 50 },
+    100,
+    100,
+  );
   assert.equal(isUsableRect(out), false);
 });
 
@@ -2204,10 +2327,21 @@ console.log("\nSI detection");
 // filename rule it works for Word files and HTML too.
 test("recognises real first pages from a library", () => {
   // Verbatim openings of the two SI PDFs found in a real library.
-  const acs = "Supporting Information for:\nModeling exchange reactions in covalent adaptable networks\nYaguang Sun1, Kaiwei Wan1,2";
-  const wiley = "Supporting Information\nfor Adv. Sci., DOI 10.1002/advs.202411385\nAI-Guided Inverse Design";
-  assert.equal(isSupportingInfo({ name: "ma3c01377_si_001.pdf", frontMatter: acs }).why, "declared");
-  assert.equal(isSupportingInfo({ name: "advs10440-sup-0001-suppmat.pdf", frontMatter: wiley }).why, "declared");
+  const acs =
+    "Supporting Information for:\nModeling exchange reactions in covalent adaptable networks\nYaguang Sun1, Kaiwei Wan1,2";
+  const wiley =
+    "Supporting Information\nfor Adv. Sci., DOI 10.1002/advs.202411385\nAI-Guided Inverse Design";
+  assert.equal(
+    isSupportingInfo({ name: "ma3c01377_si_001.pdf", frontMatter: acs }).why,
+    "declared",
+  );
+  assert.equal(
+    isSupportingInfo({
+      name: "advs10440-sup-0001-suppmat.pdf",
+      frontMatter: wiley,
+    }).why,
+    "declared",
+  );
 });
 
 test("recognises a bare heading, with or without the (SI) brackets", () => {
@@ -2229,15 +2363,26 @@ test("recognises a bare heading, with or without the (SI) brackets", () => {
 test("does not fire on an article that merely mentions SI", () => {
   // This was a real false positive: a loose /supporting information/i matched
   // an abstract sentence and sent the article itself as SI.
-  const mention = "A Study of Something\nAbstract: Details are given in the Supporting Information.\nIntroduction";
-  assert.equal(isSupportingInfo({ name: "paper.pdf", frontMatter: mention }).yes, false);
+  const mention =
+    "A Study of Something\nAbstract: Details are given in the Supporting Information.\nIntroduction";
+  assert.equal(
+    isSupportingInfo({ name: "paper.pdf", frontMatter: mention }).yes,
+    false,
+  );
   const citation = "Results\nSee Supplementary Material for details.";
-  assert.equal(isSupportingInfo({ name: "paper.pdf", frontMatter: citation }).yes, false);
+  assert.equal(
+    isSupportingInfo({ name: "paper.pdf", frontMatter: citation }).yes,
+    false,
+  );
 });
 
 test("does not fire on a journal front page", () => {
-  const front = "Chemical Physics Letters 760 (2020) 137966\nContents lists available at ScienceDirect\nResearch paper";
-  assert.equal(isSupportingInfo({ name: "1-s2.0-...-main.pdf", frontMatter: front }).yes, false);
+  const front =
+    "Chemical Physics Letters 760 (2020) 137966\nContents lists available at ScienceDirect\nResearch paper";
+  assert.equal(
+    isSupportingInfo({ name: "1-s2.0-...-main.pdf", frontMatter: front }).yes,
+    false,
+  );
 });
 
 test("filename is only a fallback, and only when siblings exist", () => {
@@ -2249,7 +2394,8 @@ test("filename is only a fallback, and only when siblings exist", () => {
 
 test("the old false positive stays fixed", () => {
   // Title ends in a standalone "Si"; no content declaration is present.
-  const name = "Shafe 等 - 2024 - Identification and Design of Better Diamine-Hardened Epoxy-Based Thermoset Shape Memory Polymers Si.pdf";
+  const name =
+    "Shafe 等 - 2024 - Identification and Design of Better Diamine-Hardened Epoxy-Based Thermoset Shape Memory Polymers Si.pdf";
   assert.equal(looksLikeSupportingFilename(name), false);
   assert.equal(isSupportingInfo({ name }).yes, false);
 });
@@ -2261,7 +2407,11 @@ test("filename rules stay narrow", () => {
     "1-s2.0-S0009261420308812-mmc1.pdf",
     "paper_ESI.pdf",
   ]) {
-    assert.equal(looksLikeSupportingFilename(name), true, `should match: ${name}`);
+    assert.equal(
+      looksLikeSupportingFilename(name),
+      true,
+      `should match: ${name}`,
+    );
   }
   for (const name of [
     "1-s2.0-S0009261420308812-main.pdf",
@@ -2270,7 +2420,11 @@ test("filename rules stay narrow", () => {
     "situ_synthesis.pdf",
     "simple_model.pdf",
   ]) {
-    assert.equal(looksLikeSupportingFilename(name), false, `should not match: ${name}`);
+    assert.equal(
+      looksLikeSupportingFilename(name),
+      false,
+      `should not match: ${name}`,
+    );
   }
 });
 
@@ -2331,14 +2485,19 @@ test("renders list items as bullets", () => {
 
 test("drops script and style bodies entirely", () => {
   // A note can contain pasted HTML; its scripts must not reach the prompt.
-  const out = htmlToText("<style>p{color:red}</style><p>x</p><script>evil()</script>");
+  const out = htmlToText(
+    "<style>p{color:red}</style><p>x</p><script>evil()</script>",
+  );
   assert.ok(!out.includes("color:red"), out);
   assert.ok(!out.includes("evil"), out);
   assert.ok(out.includes("x"));
 });
 
 test("decodes the entities Zotero notes contain", () => {
-  assert.equal(htmlToText("<p>a &amp; b &lt;c&gt; &nbsp;d</p>"), "a & b <c>  d");
+  assert.equal(
+    htmlToText("<p>a &amp; b &lt;c&gt; &nbsp;d</p>"),
+    "a & b <c>  d",
+  );
 });
 
 test("collapses excessive blank lines", () => {
@@ -2400,7 +2559,7 @@ test("decodes numeric entities in both bases", () => {
 });
 
 test("decodes the named entities KaTeX emits", () => {
-  assert.equal(decodeEntities("&amp;&lt;&gt;&quot;"), "&<>\"");
+  assert.equal(decodeEntities("&amp;&lt;&gt;&quot;"), '&<>"');
 });
 
 test("leaves unknown entities alone rather than mangling them", () => {
@@ -2408,7 +2567,10 @@ test("leaves unknown entities alone rather than mangling them", () => {
 });
 
 console.log("\nparseHtmlToMathNodes");
-function collect(node: MathNode, out: { tags: string[]; classes: string[]; text: string }) {
+function collect(
+  node: MathNode,
+  out: { tags: string[]; classes: string[]; text: string },
+) {
   if (node.tag === "#text") {
     out.text += node.attrs.value ?? "";
     return out;
@@ -2435,9 +2597,7 @@ function inspect(html: string) {
 }
 
 test("parses nested elements and preserves text", () => {
-  const r = inspect(
-    '<span class="katex"><span class="mord">x</span></span>',
-  );
+  const r = inspect('<span class="katex"><span class="mord">x</span></span>');
   assert.deepEqual(r.tags, ["span", "span"]); // tags, not class names
   assert.ok(r.classes.includes("katex"));
   assert.equal(r.text, "x");
@@ -2488,7 +2648,10 @@ test("renders the accented symbols the hand-written renderer dropped", () => {
   // comes from its stylesheet (which we inject).
   const node = latexToNodes("\\tilde{L}", false);
   const r = collect(node, { tags: [], classes: [], text: "" });
-  assert.ok(r.classes.some((c) => c.includes("accent")), r.classes.join("|"));
+  assert.ok(
+    r.classes.some((c) => c.includes("accent")),
+    r.classes.join("|"),
+  );
   assert.ok(r.text.includes("L"), `base letter missing: ${r.text}`);
   assert.ok(r.text.includes("~"), `accent mark missing: ${r.text}`);
 });
@@ -2538,12 +2701,23 @@ test("covers notation the hand-written renderer never supported", () => {
 });
 
 test("keeps KaTeX's own class names so its stylesheet applies", () => {
-  const r = collect(latexToNodes("x", false), { tags: [], classes: [], text: "" });
-  assert.ok(r.classes.some((c) => c.includes("katex")), r.classes.join("|"));
+  const r = collect(latexToNodes("x", false), {
+    tags: [],
+    classes: [],
+    text: "",
+  });
+  assert.ok(
+    r.classes.some((c) => c.includes("katex")),
+    r.classes.join("|"),
+  );
 });
 
 test("display mode produces a display wrapper", () => {
-  const r = collect(latexToNodes("x", true), { tags: [], classes: [], text: "" });
+  const r = collect(latexToNodes("x", true), {
+    tags: [],
+    classes: [],
+    text: "",
+  });
   assert.ok(
     r.classes.some((c) => c.includes("katex-display")),
     r.classes.join("|"),
@@ -2560,7 +2734,10 @@ test("a malformed formula does not throw", () => {
 test("the colour is marked on errors so the UI can flag them", () => {
   const node = latexToNodes("\\frac{a}{", false);
   const json = JSON.stringify(node);
-  assert.ok(json.includes("b45309") || json.includes("katex-error"), json.slice(0, 200));
+  assert.ok(
+    json.includes("b45309") || json.includes("katex-error"),
+    json.slice(0, 200),
+  );
 });
 
 test("buildMathNodes needs only a document, no DOM globals", () => {
@@ -2595,7 +2772,7 @@ test("trims font sources to woff2, the only format shipped", () => {
     'url(fonts/a.woff) format("woff"),url(fonts/a.ttf) format("truetype")}';
   const out = keepWoff2FontFaces(css);
   assert.ok(out.includes("a.woff2"), out);
-  assert.ok(!out.includes('a.woff)'), out);
+  assert.ok(!out.includes("a.woff)"), out);
   assert.ok(!out.includes("a.ttf"), out);
 });
 
@@ -2614,7 +2791,8 @@ test("the font-face pass drops layout rules", () => {
 });
 
 test("stripFontFaces leaves the layout rules behind", () => {
-  const css = "@font-face{src:url(fonts/a.woff2)}.katex{color:red}.mord{margin:0}";
+  const css =
+    "@font-face{src:url(fonts/a.woff2)}.katex{color:red}.mord{margin:0}";
   const out = stripFontFaces(css);
   assert.ok(!out.includes("@font-face"), out);
   assert.ok(out.includes(".katex"));
@@ -2713,21 +2891,26 @@ test("does not confuse item 1 with item 10", () => {
     "item10-2026-01-01T00-00-00-000.json",
     "item1-2026-01-02T00-00-00-000.json",
   ];
-  assert.deepEqual(pickSessionFiles(names, 1), ["item1-2026-01-02T00-00-00-000.json"]);
-  assert.deepEqual(pickSessionFiles(names, 10), ["item10-2026-01-01T00-00-00-000.json"]);
+  assert.deepEqual(pickSessionFiles(names, 1), [
+    "item1-2026-01-02T00-00-00-000.json",
+  ]);
+  assert.deepEqual(pickSessionFiles(names, 10), [
+    "item10-2026-01-01T00-00-00-000.json",
+  ]);
 });
 
 test("ignores files that are not sessions", () => {
-  const names = ["item5-a.json", "item5-a.json.tmp", "notes.txt", "itemx-a.json"];
+  const names = [
+    "item5-a.json",
+    "item5-a.json.tmp",
+    "notes.txt",
+    "itemx-a.json",
+  ];
   assert.deepEqual(pickSessionFiles(names, 5), ["item5-a.json"]);
 });
 
 test("returns oldest first so the newest can be taken last", () => {
-  const names = [
-    "item3-b.json",
-    "item3-a.json",
-    "item3-c.json",
-  ];
+  const names = ["item3-b.json", "item3-a.json", "item3-c.json"];
   assert.deepEqual(pickSessionFiles(names, 3), [
     "item3-a.json",
     "item3-b.json",

@@ -83,7 +83,7 @@ export interface ChatView {
 export function createChatView(options: ChatViewOptions): ChatView {
   const { container, doc, itemID, hooks } = options;
   let seedSelection = (options.selection || "").trim();
-  let seedQuestion = options.question || "";
+  const seedQuestion = options.question || "";
 
   ensureStyles(doc);
   container.replaceChildren();
@@ -114,15 +114,27 @@ export function createChatView(options: ChatViewOptions): ChatView {
   const spacer = doc.createElement("span");
   spacer.className = "ha-chat-spacer";
 
-  const fullTextBtn = mkButton(doc, "全文", "把论文全文一起发给模型（更准，但更贵）");
+  const fullTextBtn = mkButton(
+    doc,
+    "全文",
+    "把论文全文一起发给模型（更准，但更贵）",
+  );
   fullTextBtn.classList.add("ha-chat-toggle");
   let wantFullText = Boolean(getPref("sendFullText"));
 
   const copyBtn = mkButton(doc, "复制", "复制最近的回答");
-  const clearBtn = mkButton(doc, "清空", "开始一段新对话（已存档的内容不受影响）");
+  const clearBtn = mkButton(
+    doc,
+    "清空",
+    "开始一段新对话（已存档的内容不受影响）",
+  );
   // Development aid: crop the current selection and save it, so the geometry
   // can be checked by eye before wiring screenshots into the ask flow.
-  const shotBtn = mkButton(doc, "截图预览", "把当前选中区域裁成 PNG 存到数据目录");
+  const shotBtn = mkButton(
+    doc,
+    "截图预览",
+    "把当前选中区域裁成 PNG 存到数据目录",
+  );
   shotBtn.classList.add("ha-chat-ghost");
 
   // Whether to attach the screenshot to questions. The reader is the only one
@@ -220,8 +232,11 @@ export function createChatView(options: ChatViewOptions): ChatView {
   let destroyed = false;
   let lastAnswer = "";
   /** Everything needed to re-issue the last request. */
-  let lastQuestion: { text: string; echo: string; messages: ChatMessage[] } | null =
-    null;
+  let lastQuestion: {
+    text: string;
+    echo: string;
+    messages: ChatMessage[];
+  } | null = null;
 
   let paperText: PaperText | null = null;
   let paperTextResolved = false;
@@ -336,7 +351,9 @@ export function createChatView(options: ChatViewOptions): ChatView {
         const ratio = el.clientWidth / Math.max(1, el.scrollWidth);
         const move = (moveEvent: MouseEvent) => {
           const delta = moveEvent.clientX - startX;
-          el.scrollLeft = startLeft + delta / Math.max(0.05, ratio * (trackWidth / el.clientWidth));
+          el.scrollLeft =
+            startLeft +
+            delta / Math.max(0.05, ratio * (trackWidth / el.clientWidth));
         };
         const up = () => {
           doc.removeEventListener("mousemove", move as EventListener);
@@ -361,7 +378,9 @@ export function createChatView(options: ChatViewOptions): ChatView {
       }
       syncBar(el);
     } catch (e) {
-      Zotero.debug(`[Highlight Ask] scroll bar failed: ${(e as Error)?.message || e}`);
+      Zotero.debug(
+        `[Highlight Ask] scroll bar failed: ${(e as Error)?.message || e}`,
+      );
     }
   }
 
@@ -369,7 +388,9 @@ export function createChatView(options: ChatViewOptions): ChatView {
   function syncBar(el: HTMLElement) {
     try {
       const bar = el.querySelector(".ha-math-bar") as HTMLElement | null;
-      const thumb = el.querySelector(".ha-math-bar-thumb") as HTMLElement | null;
+      const thumb = el.querySelector(
+        ".ha-math-bar-thumb",
+      ) as HTMLElement | null;
       if (!bar || !thumb) {
         return;
       }
@@ -560,9 +581,7 @@ export function createChatView(options: ChatViewOptions): ChatView {
           ),
         );
         showHint(
-          `上下文组装失败，已改为只发送选中片段。${
-            (e as Error)?.message || e
-          }`,
+          `上下文组装失败，已改为只发送选中片段。${(e as Error)?.message || e}`,
         );
         send({ title: session?.title });
       });
@@ -751,7 +770,10 @@ export function createChatView(options: ChatViewOptions): ChatView {
       appendBubble("user", echoQuestion);
     }
 
-    const { wrap: answerWrap, body: answerBody } = appendBubble("assistant", "");
+    const { wrap: answerWrap, body: answerBody } = appendBubble(
+      "assistant",
+      "",
+    );
     answerBody.classList.add("ha-chat-streaming");
     answerBody.textContent = "思考中…";
 
@@ -905,7 +927,9 @@ export function createChatView(options: ChatViewOptions): ChatView {
     } catch (e) {
       archiveWarning = `会话存档异常：${(e as Error)?.message || e}`;
       Zotero.logError(
-        new Error(`[Highlight Ask] archiving failed: ${(e as Error)?.message || e}`),
+        new Error(
+          `[Highlight Ask] archiving failed: ${(e as Error)?.message || e}`,
+        ),
       );
       paintContextLine();
     }
@@ -1076,7 +1100,10 @@ export function createChatView(options: ChatViewOptions): ChatView {
       }
       const path = await saveShot(shot.dataUrl);
       flash(shotBtn, `${shot.width}×${shot.height}`);
-      showHint(`已保存 ${shot.width}×${shot.height} 到：${path ?? "（未能写盘）"}`, "ok");
+      showHint(
+        `已保存 ${shot.width}×${shot.height} 到：${path ?? "（未能写盘）"}`,
+        "ok",
+      );
     })();
   });
 
@@ -1105,7 +1132,6 @@ export function createChatView(options: ChatViewOptions): ChatView {
       return null;
     }
   }
-
 
   /** Name the geometry step that failed, in the user's terms. */
   function labelForStep(step: string): string {
@@ -1214,7 +1240,11 @@ export function createChatView(options: ChatViewOptions): ChatView {
         // Follow-ups carry the screenshot too. A new formula is selected for
         // most follow-ups, so omitting it here was the difference between "the
         // first formula works" and "every formula works".
-        const messages = buildFollowUpMessages(history, followUp, collectImages());
+        const messages = buildFollowUpMessages(
+          history,
+          followUp,
+          collectImages(),
+        );
         history = messages;
         paintContextLine();
         void ask(messages, question, { text: question });

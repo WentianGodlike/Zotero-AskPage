@@ -294,7 +294,10 @@ function wireButtons(
 export function matchActionsToButtons<
   T extends { id: string },
   B extends { dataset: { haAction?: string } },
->(actions: readonly T[], buttons: readonly B[]): Array<{ action: T; button: B }> {
+>(
+  actions: readonly T[],
+  buttons: readonly B[],
+): Array<{ action: T; button: B }> {
   const out: Array<{ action: T; button: B }> = [];
   for (const button of buttons) {
     const id = button.dataset?.haAction;
@@ -452,12 +455,18 @@ function stashCaptureFromReader(reader: ReaderInstance): void {
 
     const outcome = captureGeometry(search.selection);
     stashPendingCapture(
-      outcome.ok ? outcome : { ...outcome, detail: `${outcome.detail}｜探测：${search.trace}` },
+      outcome.ok
+        ? outcome
+        : { ...outcome, detail: `${outcome.detail}｜探测：${search.trace}` },
       itemID,
     );
   } catch (e) {
     stashPendingCapture(
-      { ok: false, step: "selection", detail: `异常: ${(e as Error)?.message || e}` },
+      {
+        ok: false,
+        step: "selection",
+        detail: `异常: ${(e as Error)?.message || e}`,
+      },
       itemID,
     );
   }

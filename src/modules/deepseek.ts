@@ -128,7 +128,9 @@ export function makeAbortController(): {
     // The guard sits on the same line as the construction on purpose: it is the
     // contract that makes the direct global reference safe, and keeping them
     // together makes that obvious to a reader and to the sandbox-globals check.
-    if (typeof AbortController === "undefined") { return null; }
+    if (typeof AbortController === "undefined") {
+      return null;
+    }
     const controller = new AbortController();
     return { controller, signal: controller.signal };
   } catch (e) {
@@ -395,7 +397,8 @@ export async function streamChat(options: ChatOptions): Promise<StreamResult> {
       full += delta;
       onDelta?.(full, delta);
     }
-    const rdelta: string | undefined = json?.choices?.[0]?.delta?.reasoning_content;
+    const rdelta: string | undefined =
+      json?.choices?.[0]?.delta?.reasoning_content;
     if (rdelta) {
       reasoning += rdelta;
       onReasoning?.(reasoning, rdelta);
@@ -528,4 +531,3 @@ export async function listModels(): Promise<ModelInfo[]> {
     .map((m: any) => ({ id: String(m?.id ?? m?.name ?? "") }))
     .filter((m: ModelInfo) => m.id);
 }
-
