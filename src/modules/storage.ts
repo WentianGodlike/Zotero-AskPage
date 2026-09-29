@@ -12,6 +12,10 @@
 
 const ROOT_DIR_NAME = "highlight-ask";
 
+// Kept in step with `prefsPrefix` in package.json; this module has no imports
+// by design, so it cannot read the generated config.
+const PREFS_PREFIX = "extensions.zotero.highlightask";
+
 function dataDir(): string {
   const dir = Zotero.DataDirectory?.dir;
   if (!dir) {
@@ -20,9 +24,17 @@ function dataDir(): string {
   return dir;
 }
 
-/** Join with the platform separator without pulling in a path library. */
+/**
+ * Join with the platform separator without pulling in a path library.
+ *
+ * The separator is taken from the parts themselves rather than from
+ * `dataDir()`: joining an absolute path should not require the Zotero data
+ * directory to be available, and calling `dataDir()` here made every join throw
+ * when it was not.
+ */
 function join(...parts: string[]): string {
-  const sep = dataDir().includes("\\") ? "\\" : "/";
+  const first = parts.find(Boolean) ?? "";
+  const sep = first.includes("\\") ? "\\" : "/";
   return parts
     .filter(Boolean)
     .map((p, i) => (i === 0 ? p.replace(/[\\/]+$/, "") : p.replace(/^[\\/]+|[\\/]+$/g, "")))
@@ -39,6 +51,36 @@ export function sessionsDir(): string {
 
 export function logsDir(): string {
   return join(pluginRootDir(), "logs");
+}
+
+/**
+ * Where capture previews are written.
+ *
+ * Configurable because the reader may want them next to the papers, on a
+ * scratch volume, or simply somewhere easier to open than the Zotero data
+ * directory. An empty preference keeps the default inside the plugin folder.
+ *
+ * A relative value is treated as a subdirectory of the plugin folder, so
+ * `captures` works without the reader having to know the absolute path.
+ */
+export function screenshotDir(): string {
+  let custom = "";
+  try {
+    // Read through Zotero.Prefs directly: this module deliberately has no
+    // imports, so it can be used from anywhere without a dependency cycle.
+    custom = String(
+      Zotero.Prefs.get(`${PREFS_PREFIX}.screenshotDir`, true) || "",
+    ).trim();
+  } catch {
+    custom = "";
+  }
+  if (!custom) {
+    return join(pluginRootDir(), "debug");
+  }
+  // Tolerate either separator and a trailing one.
+  const normalized = custom.replace(/[\\/]+$/, "");
+  const isAbsolute = /^([a-zA-Z]:[\\/]|\/|\\\\)/.test(normalized);
+  return isAbsolute ? normalized : join(pluginRootDir(), normalized);
 }
 
 export function requestLogPath(): string {
