@@ -24,6 +24,7 @@ declare namespace _ZoteroTypes {
       "sendSI": boolean;
       "debugScreenshot": boolean;
       "sendScreenshot": boolean;
+      "popupWidth": number;
       "siMaxChars": number;
       "sendFullText": boolean;
       "fullTextMaxChars": number;
