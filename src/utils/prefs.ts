@@ -61,7 +61,6 @@ const OBSERVED_KEYS = [
   "sendScreenshot",
   "debugScreenshot",
   "screenshotDir",
-  "popupWidth",
   "sendFullText",
   "fullTextMaxChars",
   "saveToNote",

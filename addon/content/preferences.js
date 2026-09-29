@@ -406,7 +406,6 @@
     $("sendAnnotations").checked = Boolean(readPref("sendAnnotations", true));
     $("sendSI").checked = Boolean(readPref("sendSI", true));
     $("sendScreenshot").checked = Boolean(readPref("sendScreenshot", true));
-    $("popupWidth").value = String(readPref("popupWidth", 320));
     $("screenshotDir").value = String(readPref("screenshotDir", ""));
     $("sendFullText").checked = Boolean(readPref("sendFullText", false));
     $("fullTextMaxChars").value = String(readPref("fullTextMaxChars", 120000));
@@ -497,7 +496,6 @@
     writePref("sendAnnotations", $("sendAnnotations").checked);
     writePref("sendSI", $("sendSI").checked);
     writePref("sendScreenshot", $("sendScreenshot").checked);
-    writePref("popupWidth", clampNumber($("popupWidth").value, 220, 800, 320));
     writePref("screenshotDir", String($("screenshotDir").value || "").trim());
     writePref("sendFullText", $("sendFullText").checked);
     writePref("saveToNote", $("saveToNote").checked);

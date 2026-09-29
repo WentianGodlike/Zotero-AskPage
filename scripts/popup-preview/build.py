@@ -40,20 +40,17 @@ def extract() -> tuple[str, str]:
         sys.exit("BTN_ROW_CLASS not found in readerPopup.ts")
     row_class = class_match.group(1)
 
-    # The stylesheet uses template placeholders for the class name and the
-    # popup width; resolve both so the preview matches what is injected.
-    width = 400  # matches the value being iterated on; override with --width
+    # The stylesheet uses a template placeholder for the class name.
     css = css.replace("${BTN_ROW_CLASS}", row_class)
-    css = css.replace("__HA_POPUP_WIDTH__", str(width))
     return row_class, css
 
 
 def build(row_class: str, css: str) -> str:
     """Render the row inside a container matching the reader's own constraint.
 
-    The reader caps the selection popup at 198px; the plugin raises that cap on
-    the popup element itself. The preview reproduces both, so it shows the same
-    width the reader will use.
+    The reader caps the selection popup at 198px and sizes it from its content.
+    The preview reproduces that cap, so what is inspected is what the reader
+    produces.
     """
     # The reader's own rules for the popup shell, reduced to what affects layout.
     shell = """
@@ -77,9 +74,9 @@ body {{ margin: 0; padding: 16px; background: #f4f5f7;
 {shell}
 {css}
 </style></head><body>
-<div class="label">划词弹窗（真实 CSS；宽度取自 popupWidth 偏好）</div>
-<div class="note">红色虚线为弹窗边界。注意阅读器本身的 198px 上限已由插件提高</div>
-<div class="view-popup selection-popup" style="outline:1px dashed #d33; max-width:320px !important">
+<div class="label">划词弹窗（真实 CSS + 阅读器的 198px 上限）</div>
+<div class="note">红色虚线为弹窗边界；内容超出即为溢出</div>
+<div class="view-popup selection-popup" style="outline:1px dashed #d33">
   <div class="colors" style="display:flex;gap:4px">
     <span style="width:20px;height:20px;border-radius:4px;background:#ffd400"></span>
     <span style="width:20px;height:20px;border-radius:4px;background:#ff6666"></span>

@@ -32,24 +32,6 @@ const BTN_STYLE_ID = "ha-selection-btn-styles";
  * when the panel opens) so the buttons look right immediately.
  */
 const BTN_CSS = `
-/* Widen the popup itself.
-   The reader caps it at 198px (see .selection-popup in reader.css), which is
-   too narrow for a question field. Widening the *content* instead does not
-   work: the cap is on the container, so the content just overflows and the send
-   button ends up outside. The cap therefore has to be raised on the element
-   itself, not fought from inside.
-   The reader measures the popup at runtime and clamps it to the viewport, so a
-   wider box is positioned correctly.
-   No backticks in this block: it is inside a template literal. */
-/* The width is substituted per injection — see widthRule(). A CSS custom
-   property defined on :root was the first attempt and did not work: the popup
-   lives in the reader document, and depending on the document type :root is not
-   necessarily an element the popup inherits from, so the variable resolved to
-   nothing and the fallback width applied. Substituting the number directly
-   removes that indirection entirely. */
-.selection-popup {
-  max-width: __HA_POPUP_WIDTH__px !important;
-}
 .${BTN_ROW_CLASS} {
   display: flex;
   flex-direction: column;
@@ -106,9 +88,10 @@ const BTN_CSS = `
   border-radius: 6px;
   padding: 4px 8px;
   margin: 0;
-  /* Single line: an input element cannot hold two, and the popup is now wide
-     enough that a question is readable without wrapping. */
-  height: 2em;
+  /* Three lines of room, as requested. It stays an input element: the reader
+     deletes the selected annotation on Backspace and exempts only inputs, so a
+     textarea would be dismissed mid-typing. Longer text scrolls. */
+  height: 3.9em;
   box-sizing: border-box;
 }
 .${BTN_ROW_CLASS} .ha-ask-input::placeholder { color: #9aa3b0; }
@@ -116,12 +99,6 @@ const BTN_CSS = `
   outline: none;
   border-color: #2f6feb;
   box-shadow: 0 0 0 2px rgba(47, 111, 235, 0.18);
-}
-.${BTN_ROW_CLASS} .ha-ask-width {
-  flex: 0 0 auto;
-  font: 11px/1.4 -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
-  color: #8a93a0;
-  white-space: nowrap;
 }
 .${BTN_ROW_CLASS} .ha-ask-send {
   flex: 0 0 auto;
@@ -143,44 +120,12 @@ const BTN_CSS = `
 function ensureButtonStyles(doc: Document) {
   const style = doc.getElementById(BTN_STYLE_ID) as HTMLStyleElement | null;
   if (style) {
-    // Refresh the width on every popup. The early return here used to skip the
-    // preference entirely, so changing it in the settings pane had no effect
-    // until Zotero restarted — which reads as "the setting is broken".
-    style.textContent = styleFor();
     return;
   }
   const created = doc.createElement("style");
   created.id = BTN_STYLE_ID;
-  created.textContent = styleFor();
+  created.textContent = BTN_CSS;
   (doc.head || doc.documentElement)?.appendChild(created);
-}
-
-const WIDTH_PLACEHOLDER = "__HA_POPUP_WIDTH__";
-
-/**
- * Resolve the stylesheet for the current width preference.
- *
- * The reader caps the popup at 198px; the cap has to be raised on the popup
- * element itself, because widening only the content makes it overflow. The
- * value is substituted rather than passed through a CSS custom property, which
- * silently fell back to the default.
- */
-function styleFor(): string {
-  return BTN_CSS.split(WIDTH_PLACEHOLDER).join(String(popupWidth()));
-}
-
-/**
- * The configured popup width, clamped.
- *
- * Clamped here as well as in the pane, because the preference is a plain string
- * that can be hand-edited to anything.
- */
-function popupWidth(): number {
-  const raw = Number(getPref("popupWidth"));
-  if (!Number.isFinite(raw) || raw < 220) {
-    return 320;
-  }
-  return Math.min(800, Math.round(raw));
 }
 
 export interface ReaderInstance {
@@ -251,11 +196,6 @@ function onRenderTextSelectionPopup(event: any): void {
 
     const row = doc.createElement("div");
     row.className = BTN_ROW_CLASS;
-    // Shows the value actually in effect. The width comes from a preference
-    // read at render time, and when it does not take effect the cause could be
-    // the preference, the stylesheet, or the reader — all invisible from here.
-    // Reading it off the UI settles which, without the debug console.
-    row.title = `弹窗宽度：${popupWidth()}px`;
 
     // Presets keep their own line; the input gets the full width below them.
     const actions = doc.createElement("div");
@@ -300,12 +240,6 @@ function onRenderTextSelectionPopup(event: any): void {
       input.addEventListener(type, (e: Event) => e.stopPropagation());
     }
     form.appendChild(input);
-
-    const widthTag = doc.createElement("span");
-    widthTag.className = "ha-ask-width";
-    widthTag.textContent = `${popupWidth()}px`;
-    widthTag.title = "当前生效的弹窗宽度（来自设置）";
-    form.appendChild(widthTag);
 
     const send = doc.createElement("button");
     send.type = "button";
