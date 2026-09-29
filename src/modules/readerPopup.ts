@@ -117,6 +117,12 @@ const BTN_CSS = `
   border-color: #2f6feb;
   box-shadow: 0 0 0 2px rgba(47, 111, 235, 0.18);
 }
+.${BTN_ROW_CLASS} .ha-ask-width {
+  flex: 0 0 auto;
+  font: 11px/1.4 -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  color: #8a93a0;
+  white-space: nowrap;
+}
 .${BTN_ROW_CLASS} .ha-ask-send {
   flex: 0 0 auto;
   margin-inline-start: auto;
@@ -245,6 +251,11 @@ function onRenderTextSelectionPopup(event: any): void {
 
     const row = doc.createElement("div");
     row.className = BTN_ROW_CLASS;
+    // Shows the value actually in effect. The width comes from a preference
+    // read at render time, and when it does not take effect the cause could be
+    // the preference, the stylesheet, or the reader — all invisible from here.
+    // Reading it off the UI settles which, without the debug console.
+    row.title = `弹窗宽度：${popupWidth()}px`;
 
     // Presets keep their own line; the input gets the full width below them.
     const actions = doc.createElement("div");
@@ -289,6 +300,12 @@ function onRenderTextSelectionPopup(event: any): void {
       input.addEventListener(type, (e: Event) => e.stopPropagation());
     }
     form.appendChild(input);
+
+    const widthTag = doc.createElement("span");
+    widthTag.className = "ha-ask-width";
+    widthTag.textContent = `${popupWidth()}px`;
+    widthTag.title = "当前生效的弹窗宽度（来自设置）";
+    form.appendChild(widthTag);
 
     const send = doc.createElement("button");
     send.type = "button";
