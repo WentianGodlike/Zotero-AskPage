@@ -59,7 +59,16 @@
         background: #fff;
         color: #1f2329;
       }
-      textarea { font-family: "SFMono-Regular", Consolas, monospace; font-size: 12px; resize: vertical; }
+      textarea {
+        font-family: "SFMono-Regular", Consolas, monospace;
+        font-size: 12px;
+        line-height: 1.65;
+        /* The prompt editors hold long text. Without a floor they collapse
+           below their content and the last lines run into the help text. */
+        min-height: 96px;
+        resize: vertical;
+        display: block;
+      }
       input:focus, select:focus, textarea:focus {
         outline: 2px solid #c3d0ff;
         border-color: #2f6feb;
