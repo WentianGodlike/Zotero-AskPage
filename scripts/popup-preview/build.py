@@ -46,27 +46,55 @@ def extract() -> tuple[str, str]:
 
 
 def build(row_class: str, css: str) -> str:
+    """Render the row inside a container matching the reader's own constraint.
+
+    The reader caps the selection popup at 198px (`reader.css`), and that cap is
+    the reason an earlier attempt to force a wider row pushed the send button
+    outside the popup. Reproducing the cap here is what makes the preview
+    trustworthy.
+    """
+    # The reader's own rules for the popup shell, reduced to what affects layout.
+    shell = """
+    .view-popup {
+      display: flex;
+      flex-direction: column;
+      background: #fff;
+      border-radius: 6px;
+      box-shadow: 0 0 3px rgba(0,0,0,.55), 0 8px 40px rgba(0,0,0,.25);
+      padding: 8px;
+      gap: 8px;
+    }
+    .selection-popup { max-width: 198px; padding: 8px; gap: 8px; }
+    """
     return f"""<!DOCTYPE html>
 <html><head><meta charset="utf-8"><style>
 body {{ margin: 0; padding: 16px; background: #f4f5f7;
         font: 13px -apple-system, "Segoe UI", sans-serif; }}
 .label {{ font-size: 11px; color: #888; margin-bottom: 6px; }}
-.popup {{ background: #fff; border-radius: 8px; display: inline-block;
-          box-shadow: 0 2px 10px rgba(0,0,0,.14); }}
+.note {{ font-size: 11px; color: #b06000; margin-bottom: 10px; }}
+{shell}
 {css}
 </style></head><body>
-<div class="label">划词弹窗（使用真实 CSS）</div>
-<div class="popup"><div class="{row_class}">
-  <div class="ha-ask-actions">
-    <button class="ha-selection-btn">解释这段</button>
-    <button class="ha-selection-btn">翻译</button>
-    <button class="ha-selection-btn">有何作用</button>
+<div class="label">划词弹窗（真实 CSS + 阅读器 198px 上限）</div>
+<div class="note">红色边框标出弹窗边界；内容超出即为溢出</div>
+<div class="view-popup selection-popup" style="outline:1px dashed #d33">
+  <div class="colors" style="display:flex;gap:4px">
+    <span style="width:20px;height:20px;border-radius:4px;background:#ffd400"></span>
+    <span style="width:20px;height:20px;border-radius:4px;background:#ff6666"></span>
+    <span style="width:20px;height:20px;border-radius:4px;background:#5fb236"></span>
   </div>
-  <div class="ha-ask-form">
-    <input class="ha-ask-input" placeholder="或直接提问，回车发送">
-    <button class="ha-ask-send">提问</button>
+  <div class="{row_class}">
+    <div class="ha-ask-actions">
+      <button class="ha-selection-btn">解释这段</button>
+      <button class="ha-selection-btn">翻译</button>
+      <button class="ha-selection-btn">有何作用</button>
+    </div>
+    <div class="ha-ask-form">
+      <textarea class="ha-ask-input" rows="2" placeholder="或直接提问，回车发送"></textarea>
+      <button class="ha-ask-send">提问</button>
+    </div>
   </div>
-</div></div>
+</div>
 </body></html>
 """
 
