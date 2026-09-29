@@ -182,7 +182,7 @@ npm run build      # 打包 + 类型检查 + 6 项校验
 npm run test:local # 290 项单元测试
 ```
 
-构建需要 Node ≥ 22.8（由 `zotero-plugin-scaffold` 决定，已在 `engines` 中声明）与 Python ≥ 3.8（校验脚本用，版本不足会自行给出提示）。
+构建需要 Node ≥ 22.8（由 `zotero-plugin-scaffold` 决定，已在 `engines` 中声明）与 Python ≥ 3.8（校验脚本用，版本不足会自行给出提示）。原生 Windows 没有 `python3` 命令——需启用 `python3` 别名（`py --list` 后 `ln -s` 或用 WSL）。
 
 `scripts/render-check/run.sh` 需要 bash 与 Firefox，属于**可选的**开发工具。
 
