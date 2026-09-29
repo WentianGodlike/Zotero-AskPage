@@ -1327,7 +1327,7 @@ test("the popup stylesheet sets no min-width beyond the reader's cap", () => {
   }
 });
 
-test("the question field is a single-line input, not a textarea", () => {
+test("the question field is an input element, not a textarea", () => {
   // The reader deletes the selected annotation on Backspace and exempts only
   // `input`:
   //   if (event.target.closest('input, .label-popup') || ...) return;
@@ -1348,24 +1348,27 @@ test("the question field is a single-line input, not a textarea", () => {
   );
 });
 
-test("the popup raises the reader's width cap on the popup element", () => {
-  // The cap is on the container, so widening the content just overflows it.
+test("the popup lays out inside the reader's 198px cap", () => {
+  // Raising the cap on .selection-popup looked like the fix and is not: the
+  // reader sizes the popup from its content, so a larger cap changed nothing
+  // observable. The width setting and its plumbing were removed rather than
+  // left in place doing nothing.
   const css = popupCss();
   assert.ok(
-    /\.selection-popup\s*\{[^}]*max-width/.test(css),
-    "the width cap must be raised on the popup element itself",
-  );
-  // The width is substituted into the stylesheet rather than passed through a
-  // CSS custom property: the variable was defined on :root, which is not
-  // necessarily an ancestor of the popup, so it resolved to nothing and the
-  // fallback applied — the width setting appeared to do nothing.
-  assert.ok(
-    /max-width:\s*__HA_POPUP_WIDTH__px/.test(css),
-    "expected the width placeholder to be substituted at injection time",
+    !/\.selection-popup\s*\{/.test(css),
+    "the popup element must not be restyled; the cap cannot be raised usefully",
   );
   assert.ok(
-    !/--ha-popup-width/.test(css),
-    "a :root custom property silently falls back and must not be used",
+    !/popupWidth|--ha-popup-width|__HA_POPUP_WIDTH__/.test(css),
+    "no leftover width plumbing",
+  );
+});
+
+test("the question field reserves three lines", () => {
+  const css = popupCss();
+  assert.ok(
+    /height:\s*3\.9em/.test(css),
+    "expected roughly three lines of height",
   );
 });
 

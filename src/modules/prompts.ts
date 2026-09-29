@@ -204,7 +204,7 @@ export function promptFields(): PromptField[] {
         "这份插件最关键的提示词：告诉模型 PDF 抽取的文本会有什么毛病、" +
         "公式该怎么处理。改这里比改角色更能影响回答质量。",
       default: DEFAULT_SCENARIO_PROMPT,
-      rows: 80,
+      rows: 60,
     },
     ...QUICK_ACTIONS.map((a) => ({
       prefKey: a.prefKey,
