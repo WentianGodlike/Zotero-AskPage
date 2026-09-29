@@ -370,11 +370,11 @@ export function buildInitialMessages(
         type: "image_url",
         image_url: {
           url: img.dataUrl,
-          // `original` keeps the pixels; the default already behaves this way,
-          // but stating it protects against a silent quality loss if the
-          // provider changes its default. Tiles stay inside the pixel budget
-          // so this never costs more than the flat per-image maximum.
-          detail: "original",
+          // `high` keeps the pixels. It is the standard OpenAI vision value
+          // and the documented equivalent on DeepSeek, so it works across
+          // providers; `original` was DeepSeek-only wording that strict
+          // routes answered with a 400.
+          detail: "high",
         },
       }),
     ),
@@ -407,7 +407,7 @@ export function buildFollowUpMessages(
         ...images.map(
           (img): ContentPart => ({
             type: "image_url",
-            image_url: { url: img.dataUrl, detail: "original" },
+            image_url: { url: img.dataUrl, detail: "high" },
           }),
         ),
       ],

@@ -524,6 +524,18 @@ export async function buildContext(
     }
   }
 
+  if (getPref("sendSI")) {
+    // Supporting Information: where the extended derivations and parameter
+    // tables live. The toggle and the collector both existed from the start,
+    // but the two were never connected — the feature silently sent nothing
+    // while every other link in the chain (settings switch, prompt wording,
+    // renderer, size accounting) was in place and advertised.
+    bundle.supportingInfo = await getSupportingInfo(itemID);
+    if (bundle.supportingInfo.length) {
+      bundle.summary.push(`SI ${bundle.supportingInfo.length} 份`);
+    }
+  }
+
   const retrievalOn =
     getPref("retrievePassages") &&
     Boolean(paperText?.chars) &&
