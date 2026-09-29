@@ -31,19 +31,23 @@ const BTN_STYLE_ID = "ha-selection-btn-styles";
  * when the panel opens) so the buttons look right immediately.
  */
 const BTN_CSS = `
+/* The reader constrains this popup to 198px wide (see .selection-popup in
+   reader.css). Forcing a larger width with min-width does not widen it — the
+   content simply overflows and the send button ends up outside the popup. So
+   the row is built to live inside that width: the input takes the whole first
+   line, the button wraps under it.
+   No backticks in this block: it is inside a template literal. */
 .${BTN_ROW_CLASS} {
   display: flex;
   flex-direction: column;
   gap: 6px;
   align-items: stretch;
-  padding: 4px 6px 6px;
-  /* Wide enough for the input to be usable. Chosen by rendering the row at
-     340/380/420 px side by side: 380 keeps the placeholder whole without the
-     popup growing enough to cover the text under it. */
-  min-width: 380px;
+  padding: 4px 0 2px;
+  max-width: 100%;
+  box-sizing: border-box;
 }
 
-/* Preset actions, on their own line. */
+/* Preset actions, wrapping as needed inside the popup. */
 .${BTN_ROW_CLASS} .ha-ask-actions {
   display: flex;
   gap: 4px;
@@ -51,12 +55,13 @@ const BTN_CSS = `
   flex-wrap: wrap;
 }
 .${BTN_ROW_CLASS} .ha-selection-btn {
+  flex: 0 1 auto;
   font: 12px/1.4 -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
   color: #fff;
   background: #2f6feb;
   border: 0;
   border-radius: 6px;
-  padding: 4px 10px;
+  padding: 4px 8px;
   margin: 0;
   cursor: pointer;
   white-space: nowrap;
@@ -64,25 +69,38 @@ const BTN_CSS = `
 .${BTN_ROW_CLASS} .ha-selection-btn:hover { background: #245bd0; }
 .${BTN_ROW_CLASS} .ha-selection-btn:active { background: #1d4bb0; }
 
-/* Free-form question, full width on its own line. */
+/* Free-form question. The input takes a full line; the send button wraps below
+   when there is not room beside it. */
 .${BTN_ROW_CLASS} .ha-ask-form {
   display: flex;
-  gap: 6px;
-  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: flex-start;
   width: 100%;
+  max-width: 100%;
 }
 .${BTN_ROW_CLASS} .ha-ask-input {
-  flex: 1 1 auto;
-  /* Without this the input collapses to its placeholder width when the row is
-     squeezed, which is what made it look cramped. */
-  min-width: 260px;
-  font: 12.5px/1.5 -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  flex: 1 1 100%;
+  /* No min-width: the parent is capped at 198px, so a floor here would push the
+     button out of the popup instead of widening it. */
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+  font: 12px/1.45 -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
   color: var(--fill-primary, #1f2329);
   background: var(--material-background, #fff);
   border: 1px solid var(--fill-quaternary, #c9d0da);
   border-radius: 6px;
-  padding: 6px 10px;
+  padding: 4px 8px;
   margin: 0;
+  /* Two lines reserved, as requested: the field does not grow while typing and
+     the popup height stays stable. */
+  height: 3.2em;
+  resize: none;
+  overflow-y: auto;
+  /* A textarea carries its own font and margin from the UA sheet. */
+  font-family: inherit;
+  vertical-align: top;
 }
 .${BTN_ROW_CLASS} .ha-ask-input::placeholder { color: #9aa3b0; }
 .${BTN_ROW_CLASS} .ha-ask-input:focus {
@@ -92,13 +110,15 @@ const BTN_CSS = `
 }
 .${BTN_ROW_CLASS} .ha-ask-send {
   flex: 0 0 auto;
-  font: 12.5px/1.5 -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  margin-inline-start: auto;
+  font: 12px/1.45 -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
   color: #fff;
   background: #2f6feb;
   border: 0;
   border-radius: 6px;
-  padding: 6px 16px;
-  margin: 0;
+  padding: 5px 12px;
+  margin-block: 0;
+  margin-inline-end: 0;
   cursor: pointer;
   white-space: nowrap;
 }
@@ -205,8 +225,11 @@ function onRenderTextSelectionPopup(event: any): void {
     const form = doc.createElement("div");
     form.className = "ha-ask-form";
 
-    const input = doc.createElement("input");
-    input.type = "text";
+    // A textarea rather than an input: two lines are reserved so a longer
+    // question stays readable while typing, and `rows` keeps the popup height
+    // stable instead of growing with the text.
+    const input = doc.createElement("textarea") as HTMLTextAreaElement;
+    input.rows = 2;
     input.className = "ha-ask-input";
     // Explains the feature on hover and doubles as the visible hint that this
     // row accepts free-form questions, not just the three presets.
