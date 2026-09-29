@@ -41,8 +41,14 @@ const BTN_CSS = `
    The reader measures the popup at runtime and clamps it to the viewport, so a
    wider box is positioned correctly.
    No backticks in this block: it is inside a template literal. */
+/* The width is substituted per injection — see widthRule(). A CSS custom
+   property defined on :root was the first attempt and did not work: the popup
+   lives in the reader document, and depending on the document type :root is not
+   necessarily an element the popup inherits from, so the variable resolved to
+   nothing and the fallback width applied. Substituting the number directly
+   removes that indirection entirely. */
 .selection-popup {
-  max-width: var(--ha-popup-width, 320px) !important;
+  max-width: __HA_POPUP_WIDTH__px !important;
 }
 .${BTN_ROW_CLASS} {
   display: flex;
@@ -134,26 +140,41 @@ function ensureButtonStyles(doc: Document) {
     // Refresh the width on every popup. The early return here used to skip the
     // preference entirely, so changing it in the settings pane had no effect
     // until Zotero restarted — which reads as "the setting is broken".
-    style.textContent = widthRule() + BTN_CSS;
+    style.textContent = styleFor();
     return;
   }
   const created = doc.createElement("style");
   created.id = BTN_STYLE_ID;
-  created.textContent = widthRule() + BTN_CSS;
+  created.textContent = styleFor();
   (doc.head || doc.documentElement)?.appendChild(created);
 }
 
+const WIDTH_PLACEHOLDER = "__HA_POPUP_WIDTH__";
+
 /**
- * The width override, read fresh each time.
+ * Resolve the stylesheet for the current width preference.
  *
  * The reader caps the popup at 198px; the cap has to be raised on the popup
- * element itself, because widening only the content makes it overflow.
+ * element itself, because widening only the content makes it overflow. The
+ * value is substituted rather than passed through a CSS custom property, which
+ * silently fell back to the default.
  */
-function widthRule(): string {
+function styleFor(): string {
+  return BTN_CSS.split(WIDTH_PLACEHOLDER).join(String(popupWidth()));
+}
+
+/**
+ * The configured popup width, clamped.
+ *
+ * Clamped here as well as in the pane, because the preference is a plain string
+ * that can be hand-edited to anything.
+ */
+function popupWidth(): number {
   const raw = Number(getPref("popupWidth"));
-  // Clamped here as well as in the pane: the preference is hand-editable.
-  const width = Number.isFinite(raw) && raw >= 220 ? Math.min(800, raw) : 320;
-  return `:root { --ha-popup-width: ${width}px; }\n`;
+  if (!Number.isFinite(raw) || raw < 220) {
+    return 320;
+  }
+  return Math.min(800, Math.round(raw));
 }
 
 export interface ReaderInstance {

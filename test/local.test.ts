@@ -1355,7 +1355,18 @@ test("the popup raises the reader's width cap on the popup element", () => {
     /\.selection-popup\s*\{[^}]*max-width/.test(css),
     "the width cap must be raised on the popup element itself",
   );
-  assert.ok(/--ha-popup-width/.test(css), "expected a configurable width");
+  // The width is substituted into the stylesheet rather than passed through a
+  // CSS custom property: the variable was defined on :root, which is not
+  // necessarily an ancestor of the popup, so it resolved to nothing and the
+  // fallback applied — the width setting appeared to do nothing.
+  assert.ok(
+    /max-width:\s*__HA_POPUP_WIDTH__px/.test(css),
+    "expected the width placeholder to be substituted at injection time",
+  );
+  assert.ok(
+    !/--ha-popup-width/.test(css),
+    "a :root custom property silently falls back and must not be used",
+  );
 });
 
 test("the question row wraps instead of overflowing", () => {

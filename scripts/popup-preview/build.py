@@ -40,8 +40,11 @@ def extract() -> tuple[str, str]:
         sys.exit("BTN_ROW_CLASS not found in readerPopup.ts")
     row_class = class_match.group(1)
 
-    # The stylesheet uses a template placeholder for the class name.
+    # The stylesheet uses template placeholders for the class name and the
+    # popup width; resolve both so the preview matches what is injected.
+    width = 400  # matches the value being iterated on; override with --width
     css = css.replace("${BTN_ROW_CLASS}", row_class)
+    css = css.replace("__HA_POPUP_WIDTH__", str(width))
     return row_class, css
 
 
