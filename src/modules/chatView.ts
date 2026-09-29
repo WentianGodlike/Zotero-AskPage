@@ -18,8 +18,8 @@ import {
   takePendingOutcome,
   takePendingCapture,
 } from "./screenshot";
-import { ensureDir, pluginRootDir } from "./storage";
-import { getPref } from "../utils/prefs";
+import { ensureDir, screenshotDir } from "./storage";
+import { getPref, observePrefs } from "../utils/prefs";
 import { getPaperText, describePaperText, type PaperText } from "./fulltext";
 import { buildContext, bundleSize, type ContextBundle } from "./context";
 import {
@@ -124,7 +124,6 @@ export function createChatView(options: ChatViewOptions): ChatView {
   // can be checked by eye before wiring screenshots into the ask flow.
   const shotBtn = mkButton(doc, "截图预览", "把当前选中区域裁成 PNG 存到数据目录");
   shotBtn.classList.add("ha-chat-ghost");
-  shotBtn.hidden = !getPref("debugScreenshot");
 
   // Whether to attach the screenshot to questions. The reader is the only one
   // who knows if this question is about a formula, and the token cost is shown
@@ -385,6 +384,26 @@ export function createChatView(options: ChatViewOptions): ChatView {
     } catch {
       /* best effort */
     }
+  }
+
+  /**
+   * Apply preferences that affect what is visible.
+   *
+   * Called at construction and again whenever a preference changes. Reading a
+   * preference once at construction is what made "turn off the capture-preview
+   * button" require a Zotero restart: the button's visibility was set from a
+   * value captured before the setting was changed.
+   */
+  function applyPrefs(): void {
+    shotBtn.hidden = !getPref("debugScreenshot");
+    wantFullText = Boolean(getPref("sendFullText"));
+    wantScreenshot = Boolean(getPref("sendScreenshot"));
+    // Reuse the painters rather than re-deriving the appearance here: the
+    // image toggle also draws a tick/cross, and duplicating that logic is how
+    // the two drift apart.
+    paintFullTextBtn();
+    paintImageToggle();
+    paintContextLine();
   }
 
   /** Markdown options used everywhere in this view. */
@@ -932,6 +951,13 @@ export function createChatView(options: ChatViewOptions): ChatView {
   }
 
   function destroy() {
+    // Stop reacting to preference changes: a destroyed view must not keep a
+    // closure alive against a detached DOM.
+    try {
+      stopObservingPrefs();
+    } catch {
+      /* already torn down */
+    }
     destroyed = true;
     abort?.abort();
     abort = null;
@@ -1057,7 +1083,7 @@ export function createChatView(options: ChatViewOptions): ChatView {
   /** Write a captured PNG into the data directory and return its path. */
   async function saveShot(dataUrl: string): Promise<string | null> {
     try {
-      const dir = `${pluginRootDir()}/debug`;
+      const dir = screenshotDir();
       const stamp = new Date().toISOString().replace(/[:.]/g, "-");
       const file = `${dir}/capture-${stamp}.png`;
       const base64 = dataUrl.slice(dataUrl.indexOf(",") + 1);
@@ -1155,6 +1181,17 @@ export function createChatView(options: ChatViewOptions): ChatView {
   // Fetch Zotero's KaTeX stylesheet once; until it lands, math still renders
   // (with the fallback chip styling) rather than breaking.
   void installKatexStyles(doc, rootURI);
+  applyPrefs();
+  const stopObservingPrefs = observePrefs(() => {
+    try {
+      applyPrefs();
+    } catch (e) {
+      Zotero.debug(
+        `[Highlight Ask] applying preferences failed: ${(e as Error)?.message || e}`,
+      );
+    }
+  });
+
   void loadPaperText().then(() => loadPreviousSession());
 
   if (options.manual && seedQuestion) {

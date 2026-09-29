@@ -23,6 +23,7 @@ declare namespace _ZoteroTypes {
       "sendAnnotations": boolean;
       "sendSI": boolean;
       "debugScreenshot": boolean;
+      "screenshotDir": string;
       "sendScreenshot": boolean;
       "popupWidth": number;
       "siMaxChars": number;

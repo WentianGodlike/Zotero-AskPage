@@ -15,7 +15,15 @@ import { resolve } from "node:path";
 
 // `parseThinkingParams` logs through Zotero when the JSON is malformed; stub the
 // global so the import works outside Zotero.
-(globalThis as any).Zotero = { debug: () => {} };
+// The stub also carries what `storage.ts` needs for path resolution: a data
+// directory and a readable preference store. Defined before the module imports
+// below, which capture `Zotero` when they are first evaluated.
+(globalThis as any).__prefs = {};
+(globalThis as any).Zotero = {
+  debug: () => {},
+  DataDirectory: { dir: "/data" },
+  Prefs: { get: (key: string) => (globalThis as any).__prefs?.[key] },
+};
 
 import {
   normalizeSelection,
@@ -37,6 +45,7 @@ import {
 import { HIGHLIGHT_ASK_PROVIDERS } from "../src/data/providers.data";
 import { validateSettings, getProvider } from "../src/modules/providers";
 import { matchesItem } from "../src/modules/sidebar";
+import { screenshotDir } from "../src/modules/storage";
 import {
   chunkText,
   tokenize,
@@ -1093,7 +1102,10 @@ const fakeItems: Record<number, any> = {
   200: { id: 200, parentItemID: false, getAttachments: () => [201] }, // unrelated
   201: { id: 201, parentItemID: 200, getAttachments: () => [] },
 };
+// Merge rather than replace: an earlier stub already provides the data
+// directory and preference store that other modules read.
 (globalThis as any).Zotero = {
+  ...(globalThis as any).Zotero,
   debug: () => {},
   Items: { get: (id: number) => fakeItems[id] },
 };
@@ -1255,6 +1267,39 @@ test("non-SVG elements stay in the HTML namespace", () => {
   for (const el of made) {
     assert.equal(el.ns, "html", `${el.tag} should be HTML`);
   }
+});
+
+console.log("\nscreenshot directory resolution");
+// The capture-preview path is configurable. A mis-resolved path writes files
+// somewhere the reader cannot find, which reads as "the button did nothing".
+const SCREENSHOT_PREF = "extensions.zotero.highlightask.screenshotDir";
+function withPref(value: string): string {
+  (globalThis as any).__prefs = { [SCREENSHOT_PREF]: value };
+  return screenshotDir();
+}
+
+test("an empty preference keeps the default location", () => {
+  assert.equal(withPref(""), "/data/highlight-ask/debug");
+});
+
+test("a relative value becomes a subdirectory of the plugin folder", () => {
+  assert.equal(withPref("captures"), "/data/highlight-ask/captures");
+  assert.equal(withPref("a/b"), "/data/highlight-ask/a/b");
+});
+
+test("a trailing separator is tolerated", () => {
+  assert.equal(withPref("captures/"), "/data/highlight-ask/captures");
+  assert.equal(withPref("captures//"), "/data/highlight-ask/captures");
+});
+
+test("an absolute path is used as given", () => {
+  assert.equal(withPref("/tmp/ha"), "/tmp/ha");
+  assert.equal(withPref("/tmp/ha/"), "/tmp/ha");
+});
+
+test("whitespace is trimmed rather than becoming a directory name", () => {
+  assert.equal(withPref("   "), "/data/highlight-ask/debug");
+  assert.equal(withPref("  captures  "), "/data/highlight-ask/captures");
 });
 
 console.log("\nselection popup: layout constraints");

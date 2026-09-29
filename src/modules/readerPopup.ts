@@ -129,20 +129,31 @@ const BTN_CSS = `
 `;
 
 function ensureButtonStyles(doc: Document) {
-  if (doc.getElementById(BTN_STYLE_ID)) {
+  const style = doc.getElementById(BTN_STYLE_ID) as HTMLStyleElement | null;
+  if (style) {
+    // Refresh the width on every popup. The early return here used to skip the
+    // preference entirely, so changing it in the settings pane had no effect
+    // until Zotero restarted — which reads as "the setting is broken".
+    style.textContent = widthRule() + BTN_CSS;
     return;
   }
-  const style = doc.createElement("style");
-  style.id = BTN_STYLE_ID;
-  // The width is a preference because the right value depends on the screen and
-  // on how long the reader's questions are; the reader measures the popup at
-  // runtime, so changing this is safe.
-  const width = Number(getPref("popupWidth")) || 320;
-  // Built by concatenation: BTN_CSS is itself a template literal, so nesting
-  // backticks here would terminate it early.
-  style.textContent =
-    ":root { --ha-popup-width: " + width + "px; }\n" + BTN_CSS;
-  (doc.head || doc.documentElement)?.appendChild(style);
+  const created = doc.createElement("style");
+  created.id = BTN_STYLE_ID;
+  created.textContent = widthRule() + BTN_CSS;
+  (doc.head || doc.documentElement)?.appendChild(created);
+}
+
+/**
+ * The width override, read fresh each time.
+ *
+ * The reader caps the popup at 198px; the cap has to be raised on the popup
+ * element itself, because widening only the content makes it overflow.
+ */
+function widthRule(): string {
+  const raw = Number(getPref("popupWidth"));
+  // Clamped here as well as in the pane: the preference is hand-editable.
+  const width = Number.isFinite(raw) && raw >= 220 ? Math.min(800, raw) : 320;
+  return `:root { --ha-popup-width: ${width}px; }\n`;
 }
 
 export interface ReaderInstance {
