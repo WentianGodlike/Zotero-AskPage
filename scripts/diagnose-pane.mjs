@@ -12,13 +12,33 @@
  *
  * Usage: node scripts/diagnose-pane.mjs [path-to-xpi]
  */
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import vm from "node:vm";
 import { execFileSync } from "node:child_process";
 
 const XPI =
   process.argv[2] ||
-  "/home/yangruiyu/.zotero/zotero/pxhfwm8i.default/extensions/highlight-ask@yangruiyu.dev.xpi";
+  // Default to the build output rather than a machine-specific install path:
+  // a hardcoded /home/... path escaped the cross-platform check (which scans
+  // Python only) and broke for anyone else on the first run.
+  (() => {
+    const dir = new URL("../.scaffold/build/", import.meta.url);
+    try {
+      const xpis = readdirSync(dir)
+        .filter((n) => n.endsWith(".xpi"))
+        .sort();
+      if (xpis.length) {
+        return new URL(xpis[xpis.length - 1], dir).pathname;
+      }
+    } catch {
+      /* fall through to the message below */
+    }
+    console.error(
+      "No .xpi under .scaffold/build — run `npm run build` first, or pass one:\n" +
+        "  npm run diagnose -- /path/to/plugin.xpi",
+    );
+    process.exit(2);
+  })();
 
 /** Pull a file out of the XPI without a zip library. */
 function readFromXpi(path, entry) {

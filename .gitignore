@@ -19,3 +19,7 @@ logs
 scripts/render-check/out/
 scripts/popup-preview/out/
 scripts/prefs-preview/out/
+
+# Python bytecode (the check scripts are invoked on every build)
+__pycache__/
+*.pyc

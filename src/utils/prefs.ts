@@ -36,7 +36,7 @@ export function clearPref(key: string) {
 }
 
 /**
- * Preference keys this plugin owns.
+ * Preference keys this plugin observes for live updates.
  *
  * Listed explicitly because Zotero's `Prefs.registerObserver` matches the
  * preference name **exactly** — registering a prefix such as
@@ -44,10 +44,13 @@ export function clearPref(key: string) {
  * `_observers[fullPrefName]` and finds nothing. One observer per key is the
  * supported way.
  *
- * Kept in step with `addon/prefs.js`; `prefs.d.ts` is generated from it and the
- * two are checked by the preferences-pane tests.
+ * Keys absent here are read at use time rather than cached at construction
+ * (the prompt texts, siMaxChars), so they need no observer. The set is
+ * checked against `addon/prefs.js` by a unit test: a key typo here would
+ * silently mean "no live update", which reads to the user as "the setting is
+ * broken".
  */
-const OBSERVED_KEYS = [
+export const OBSERVED_KEYS = [
   "provider",
   "apiKey",
   "baseUrl",

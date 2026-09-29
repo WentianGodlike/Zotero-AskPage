@@ -12,7 +12,9 @@ permissions:
 
 jobs:
   create-release:
-    uses: zotero-plugin-dev/workflows/.github/workflows/release-plugin.yml@main
+    # Pinned to a commit SHA: @main would let any upstream push change what
+    # gets published here. Update deliberately, after reading the diff.
+    uses: zotero-plugin-dev/workflows/.github/workflows/release-plugin.yml@6bc4563f443313f6cebd3e425ba02f8929fb8d3f
     # You can customize any of the inputs here.
     # If you omit an input, its default value will be used.
     with:
