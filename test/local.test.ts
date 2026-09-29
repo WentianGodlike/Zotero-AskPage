@@ -39,6 +39,8 @@ import {
   parseThinkingParams,
   canAbort,
   makeAbortController,
+  createSseAccumulator,
+  withTimeout,
 } from "../src/modules/deepseek";
 import {
   renderMarkdown,
@@ -63,7 +65,6 @@ import {
   clampRect,
   isUsableRect,
   unionRects,
-  dataUrlBytes,
   looksLikeFormulaSelection,
   planTiles,
   effectiveTileScale,
@@ -100,6 +101,7 @@ import {
 } from "../src/modules/prompts";
 import {
   appendTurn,
+  asSession,
   makeSessionId,
   sessionChars,
   renderSessionHtml,
@@ -107,6 +109,7 @@ import {
   type Session,
   type SessionTurn,
 } from "../src/modules/notes";
+import { OBSERVED_KEYS } from "../src/utils/prefs";
 import registerPreferencesPaneTests from "./preferencesPane.test";
 
 let passed = 0;
@@ -456,6 +459,97 @@ test("keeps nested values intact", () => {
     '{"thinking":{"type":"enabled"},"top_p":0.95}',
   );
   assert.deepEqual(out, { thinking: { type: "enabled" }, top_p: 0.95 });
+});
+
+/* ---------------------------------------------------------------- */
+
+console.log("\nSSE stream parsing");
+// Regression: a malformed data line used to re-buffer itself. Only lines
+// already terminated by \n reach the handler, so the re-buffered line was
+// re-extracted and re-failed on without end — a synchronous infinite loop
+// that froze the whole UI. A gateway injecting a keep-alive line was enough.
+test("a non-JSON data line is dropped, not rebuffered", () => {
+  const seen: any[] = [];
+  const sse = createSseAccumulator({ onJson: (j) => seen.push(j) });
+  sse.push("data: [CONNECT]\n");
+  sse.push('data: {"choices":[{"delta":{"content":"hi"}}]}\n');
+  sse.end();
+  assert.equal(seen.length, 1);
+  assert.equal(seen[0]?.choices?.[0]?.delta?.content, "hi");
+});
+
+test("an event split across chunks is reassembled", () => {
+  const seen: any[] = [];
+  const sse = createSseAccumulator({ onJson: (j) => seen.push(j) });
+  sse.push('data: {"choices":[{"del');
+  sse.push('ta":{"content":"x"}}]}\n');
+  assert.equal(seen.length, 1);
+  assert.equal(seen[0]?.choices?.[0]?.delta?.content, "x");
+});
+
+test("comments, empty lines and [DONE] are skipped", () => {
+  const seen: any[] = [];
+  const sse = createSseAccumulator({ onJson: (j) => seen.push(j) });
+  sse.push(": keep-alive\n\n");
+  sse.push("event: delta\n");
+  sse.push("data: [DONE]\n");
+  sse.push("data:\n");
+  sse.push('data: {"usage":{"total_tokens":3}}\n');
+  sse.end();
+  assert.equal(seen.length, 1);
+  assert.equal(seen[0]?.usage?.total_tokens, 3);
+});
+
+test("CRLF line endings are tolerated", () => {
+  const seen: any[] = [];
+  const sse = createSseAccumulator({ onJson: (j) => seen.push(j) });
+  sse.push('data: {"a":1}\r\ndata: [DONE]\r\n');
+  sse.end();
+  assert.equal(seen.length, 1);
+  assert.equal(seen[0]?.a, 1);
+});
+
+test("a trailing line without a newline is flushed by end()", () => {
+  const seen: any[] = [];
+  const sse = createSseAccumulator({ onJson: (j) => seen.push(j) });
+  sse.push('data: {"choices":[{"delta":{"content":"tail"}}]}');
+  sse.end();
+  assert.equal(seen.length, 1);
+  assert.equal(seen[0]?.choices?.[0]?.delta?.content, "tail");
+});
+
+test("parsed objects reach onJson unchanged", () => {
+  // streamChat's onJson is what turns {"error":...} into a user-visible
+  // failure; the accumulator's contract is just to deliver the object.
+  const seen: any[] = [];
+  const sse = createSseAccumulator({ onJson: (j) => seen.push(j) });
+  sse.push('data: {"error":{"message":"boom"}}\n');
+  assert.equal(seen[0]?.error?.message, "boom");
+});
+
+console.log("\nrequest timeouts");
+// Without these, a stalled stream kept the panel on "生成中…" forever: the
+// sandbox has no AbortController, so nothing else would ever cut it loose.
+test("withTimeout passes a fast promise through", async () => {
+  const value = await withTimeout(Promise.resolve(42), 5_000, "boom");
+  assert.equal(value, 42);
+});
+
+test("withTimeout rejects with a retryable network error", async () => {
+  await assert.rejects(
+    withTimeout(new Promise(() => {}), 20, "超时"),
+    (e: any) => e instanceof DeepSeekError && e.kind === "network",
+  );
+});
+
+test("withTimeout clears its timer once settled", async () => {
+  // A fast stream must not accumulate one live timer per chunk.
+  const before = (process as any)._getActiveHandles?.()?.length ?? 0;
+  for (let i = 0; i < 50; i++) {
+    await withTimeout(Promise.resolve(i), 5_000, "boom");
+  }
+  const after = (process as any)._getActiveHandles?.()?.length ?? 0;
+  assert.equal(after, before);
 });
 
 /* ---------------------------------------------------------------- */
@@ -1727,6 +1821,12 @@ test("stems plurals and common suffixes", () => {
   assert.equal(tokenize("models")[0], tokenize("model")[0]);
 });
 
+test("a singular and its plural share a stem after ss/us/is endings", () => {
+  // "classes" used to stem to "class" while "class" stemmed to "clas", so a
+  // query containing one form could not match a passage containing the other.
+  assert.equal(tokenize("classes")[0], tokenize("class")[0]);
+});
+
 test("splits CJK into bigrams", () => {
   // No segmenter available, and this also lets a Chinese question match
   // Chinese notes the reader wrote.
@@ -1850,12 +1950,16 @@ test("several tiles become several image parts", () => {
   assert.equal(parts.filter((p) => p.type === "image_url").length, 3);
 });
 
-test("images are declared as original so nothing is resampled", () => {
+test("images request high fidelity with the portable detail value", () => {
+  // `high` is the standard OpenAI vision value and the documented equivalent
+  // on DeepSeek. `original` was DeepSeek-only wording: strict routes on other
+  // providers answered it with a 400, and the unsupported-parameter retry
+  // could not strip it because it lives inside messages, not in extras.
   const out = buildFollowUpMessages([], "q", [
     { dataUrl: "data:image/png;base64,AA" },
   ]);
   const parts = out[out.length - 1].content as any[];
-  assert.equal(parts[1].image_url.detail, "original");
+  assert.equal(parts[1].image_url.detail, "high");
 });
 
 test("the previous history is preserved", () => {
@@ -2315,12 +2419,6 @@ test("union of nothing is null", () => {
   assert.equal(unionRects([]), null);
 });
 
-test("estimates decoded PNG size from a data URL", () => {
-  // 8 base64 chars = 6 bytes.
-  assert.equal(dataUrlBytes("data:image/png;base64,AAAAAAAA"), 6);
-  assert.equal(dataUrlBytes("not-a-data-url"), 0);
-});
-
 console.log("\nSI detection");
 // The authoritative signal is the document's own front matter — that is what
 // publishers print on the first page of supporting material, and unlike a
@@ -2761,6 +2859,56 @@ test("buildMathNodes needs only a document, no DOM globals", () => {
   assert.ok(created.length > 0);
 });
 
+test("unknown tags degrade to spans, unknown attributes are dropped", () => {
+  // This builder is the heavy path by which model-influenced output enters
+  // the DOM. `createElement("script")` inserted into a document executes, and
+  // `setAttribute("onclick", …)` compiles into a live handler — so the parser
+  // must hold on its own, not only behind KaTeX's trust:false.
+  const attrs: Array<[string, string]> = [];
+  const created: string[] = [];
+  const fakeDoc = {
+    createElement(tag: string) {
+      created.push(tag);
+      return {
+        setAttribute(name: string, value: string) {
+          attrs.push([name, value]);
+        },
+        appendChild() {},
+      };
+    },
+    createElementNS(_ns: string, tag: string) {
+      created.push(tag);
+      return {
+        setAttribute(name: string, value: string) {
+          attrs.push([name, value]);
+        },
+        appendChild() {},
+      };
+    },
+    createTextNode(text: string) {
+      created.push("#text");
+      return { text };
+    },
+  } as unknown as Document;
+
+  const tree = parseHtmlToMathNodes(
+    '<script onclick="alert(1)">alert(2)</script>' +
+      '<svg viewBox="0 0 1 1"><path d="M0 0"/></svg>',
+  );
+  buildMathNodes(tree, fakeDoc);
+
+  assert.ok(
+    !created.includes("script"),
+    `script must not be created: ${created}`,
+  );
+  // The script's text child survives as inert text inside a span.
+  assert.ok(created.includes("#text"));
+  // viewBox survives (SVG geometry), onclick does not.
+  const names = attrs.map(([n]) => n);
+  assert.ok(names.includes("viewBox"), `viewBox must survive: ${names}`);
+  assert.ok(!names.includes("onclick"), `onclick must be dropped: ${names}`);
+});
+
 console.log("\nKaTeX stylesheet");
 // The fonts ship with the addon. An earlier version pointed the font URLs at
 // Zotero's own copies, whose filenames carry a build-time hash; every request
@@ -2897,6 +3045,69 @@ test("does not confuse item 1 with item 10", () => {
   assert.deepEqual(pickSessionFiles(names, 10), [
     "item10-2026-01-01T00-00-00-000.json",
   ]);
+});
+
+console.log("\nasSession (mirror shape validation)");
+// A mirror file can be valid JSON and still not be a session. Without this
+// narrowing, the restore scan threw on `turns.length` and its catch wrapped
+// the whole loop — one bad file abandoned every older, valid session too.
+test("accepts a well-formed session", () => {
+  const s = asSession({
+    id: "item1-x",
+    itemID: 1,
+    turns: [{ question: "q", answer: "a", ts: "t", selection: "s" }],
+  });
+  assert.ok(s);
+  assert.equal(s.turns.length, 1);
+});
+
+test("rejects values that are not sessions", () => {
+  assert.equal(asSession(null), null);
+  assert.equal(asSession("text"), null);
+  assert.equal(asSession([1, 2]), null);
+  assert.equal(asSession({}), null);
+  assert.equal(asSession({ turns: [] }), null); // missing id/itemID
+  assert.equal(asSession({ turns: null, id: "i", itemID: 1 }), null);
+});
+
+test("drops turns that lack a question or an answer", () => {
+  // The mirror is external data; forwarding a half-turn would put
+  // `content: undefined` into the next request.
+  const s = asSession({
+    id: "i",
+    itemID: 1,
+    turns: [
+      { question: "q", answer: "a", ts: "t", selection: "s" },
+      { question: "broken" },
+      null,
+    ],
+  });
+  assert.ok(s);
+  assert.equal(s.turns.length, 1);
+});
+
+console.log("\npreference-key sync");
+test("every observed key exists in addon/prefs.js", () => {
+  // OBSERVED_KEYS is maintained by hand next to a machine-generated typings
+  // file; a typo here silently means "no live update", which reads to the
+  // user as "the setting is broken". Checked against the source of truth.
+  const source = readFileSync(
+    new URL("../addon/prefs.js", import.meta.url),
+    "utf8",
+  );
+  const declared = new Set(
+    (source.match(/pref\("([a-zA-Z]+)"/g) || []).map((m) => m.slice(6, -1)),
+  );
+  assert.ok(
+    declared.size >= 20,
+    `expected a real pref list, got ${declared.size}`,
+  );
+  for (const key of OBSERVED_KEYS) {
+    assert.ok(
+      declared.has(key),
+      `OBSERVED_KEYS contains "${key}" but addon/prefs.js does not declare it`,
+    );
+  }
 });
 
 test("ignores files that are not sessions", () => {

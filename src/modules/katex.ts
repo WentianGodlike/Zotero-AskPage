@@ -69,17 +69,105 @@ const SVG_TAGS = new Set([
   "marker",
 ]);
 
+/**
+ * Tags this builder will ever create.
+ *
+ * This is the heavy path by which model-influenced output enters the DOM, and
+ * `createElement("script")` or `setAttribute("onclick", …)` become live the
+ * moment they are inserted. `trust:false` keeps KaTeX from emitting anything
+ * dangerous today, but this parser must also hold on its own — if it is ever
+ * fed non-KaTeX markup, or KaTeX regresses, or someone flips `trust`, the
+ * allowlist is what stops it. Anything unknown degrades to an inert span
+ * (children are kept); the set is what KaTeX's html output actually emits.
+ */
+const ALLOWED_TAGS = new Set([
+  "span",
+  "div",
+  "br",
+  "i",
+  "em",
+  "strong",
+  "b",
+  "u",
+  "s",
+  "sup",
+  "sub",
+  "small",
+  "mark",
+  ...SVG_TAGS,
+]);
+
+/**
+ * Attributes this builder will ever set — formatting and SVG geometry only.
+ * Everything else (event handlers, src, tabindex, data-*) is dropped.
+ */
+const ALLOWED_ATTRS = new Set([
+  "class",
+  "style",
+  "aria-hidden",
+  "role",
+  "width",
+  "height",
+  "viewBox",
+  "preserveAspectRatio",
+  "d",
+  "fill",
+  "stroke",
+  "stroke-width",
+  "stroke-linecap",
+  "stroke-linejoin",
+  "stroke-miterlimit",
+  "transform",
+  "points",
+  "x",
+  "y",
+  "x1",
+  "y1",
+  "x2",
+  "y2",
+  "cx",
+  "cy",
+  "r",
+  "rx",
+  "ry",
+  "offset",
+  "id",
+  "href",
+  "xlink:href",
+  "xmlns",
+  "xmlns:xlink",
+  "dx",
+  "dy",
+  "text-anchor",
+  "font-family",
+  "font-size",
+  "font-weight",
+  "font-style",
+  "opacity",
+  "clip-path",
+  "markerWidth",
+  "markerHeight",
+  "refX",
+  "refY",
+  "orient",
+  "pathLength",
+]);
+
 /** Build real elements from a MathNode tree using the host's document. */
 export function buildMathNodes(node: MathNode, doc: Document): Node {
   if (node.tag === TEXT_TAG) {
     return doc.createTextNode(node.attrs.value ?? "");
   }
-  // Namespace matters: see SVG_TAGS.
-  const el = SVG_TAGS.has(node.tag)
-    ? doc.createElementNS(SVG_NS, node.tag)
-    : doc.createElement(node.tag);
+  // Namespace matters: see SVG_TAGS. An unknown tag degrades to a span so its
+  // children survive as text rather than as a live element.
+  const tag = ALLOWED_TAGS.has(node.tag) ? node.tag : "span";
+  const el = SVG_TAGS.has(tag)
+    ? doc.createElementNS(SVG_NS, tag)
+    : doc.createElement(tag);
   for (const [name, value] of Object.entries(node.attrs)) {
-    el.setAttribute(name, value);
+    if (ALLOWED_ATTRS.has(name)) {
+      el.setAttribute(name, value);
+    }
   }
   for (const child of node.children) {
     el.appendChild(buildMathNodes(child, doc));
