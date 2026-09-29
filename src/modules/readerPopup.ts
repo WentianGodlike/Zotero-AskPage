@@ -33,11 +33,22 @@ const BTN_STYLE_ID = "ha-selection-btn-styles";
 const BTN_CSS = `
 .${BTN_ROW_CLASS} {
   display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: stretch;
+  padding: 4px 6px 6px;
+  /* Wide enough for the input to be usable. Chosen by rendering the row at
+     340/380/420 px side by side: 380 keeps the placeholder whole without the
+     popup growing enough to cover the text under it. */
+  min-width: 380px;
+}
+
+/* Preset actions, on their own line. */
+.${BTN_ROW_CLASS} .ha-ask-actions {
+  display: flex;
   gap: 4px;
   align-items: center;
   flex-wrap: wrap;
-  padding: 2px 4px;
-  max-width: 380px;
 }
 .${BTN_ROW_CLASS} .ha-selection-btn {
   font: 12px/1.4 -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
@@ -45,45 +56,48 @@ const BTN_CSS = `
   background: #2f6feb;
   border: 0;
   border-radius: 6px;
-  padding: 3px 9px;
-  margin: 0 1px;
+  padding: 4px 10px;
+  margin: 0;
   cursor: pointer;
   white-space: nowrap;
 }
 .${BTN_ROW_CLASS} .ha-selection-btn:hover { background: #245bd0; }
 .${BTN_ROW_CLASS} .ha-selection-btn:active { background: #1d4bb0; }
 
-/* Free-form question, on its own line under the preset buttons. */
+/* Free-form question, full width on its own line. */
 .${BTN_ROW_CLASS} .ha-ask-form {
   display: flex;
-  gap: 4px;
+  gap: 6px;
   align-items: center;
   width: 100%;
-  margin-top: 4px;
 }
 .${BTN_ROW_CLASS} .ha-ask-input {
   flex: 1 1 auto;
-  min-width: 0;
-  font: 12px/1.4 -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  /* Without this the input collapses to its placeholder width when the row is
+     squeezed, which is what made it look cramped. */
+  min-width: 260px;
+  font: 12.5px/1.5 -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
   color: var(--fill-primary, #1f2329);
   background: var(--material-background, #fff);
   border: 1px solid var(--fill-quaternary, #c9d0da);
   border-radius: 6px;
-  padding: 4px 8px;
+  padding: 6px 10px;
   margin: 0;
 }
+.${BTN_ROW_CLASS} .ha-ask-input::placeholder { color: #9aa3b0; }
 .${BTN_ROW_CLASS} .ha-ask-input:focus {
   outline: none;
   border-color: #2f6feb;
   box-shadow: 0 0 0 2px rgba(47, 111, 235, 0.18);
 }
 .${BTN_ROW_CLASS} .ha-ask-send {
-  font: 12px/1.4 -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  flex: 0 0 auto;
+  font: 12.5px/1.5 -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
   color: #fff;
   background: #2f6feb;
   border: 0;
   border-radius: 6px;
-  padding: 4px 12px;
+  padding: 6px 16px;
   margin: 0;
   cursor: pointer;
   white-space: nowrap;
@@ -169,6 +183,10 @@ function onRenderTextSelectionPopup(event: any): void {
 
     const row = doc.createElement("div");
     row.className = BTN_ROW_CLASS;
+
+    // Presets keep their own line; the input gets the full width below them.
+    const actions = doc.createElement("div");
+    actions.className = "ha-ask-actions";
     for (const action of QUICK_ACTIONS) {
       const btn = doc.createElement("button");
       btn.type = "button";
@@ -180,8 +198,9 @@ function onRenderTextSelectionPopup(event: any): void {
       btn.dataset.haAction = action.id;
       // Keep the PDF selection alive while the user moves to click.
       btn.addEventListener("mousedown", (e: Event) => e.stopPropagation());
-      row.appendChild(btn);
+      actions.appendChild(btn);
     }
+    row.appendChild(actions);
 
     const form = doc.createElement("div");
     form.className = "ha-ask-form";
@@ -191,7 +210,7 @@ function onRenderTextSelectionPopup(event: any): void {
     input.className = "ha-ask-input";
     // Explains the feature on hover and doubles as the visible hint that this
     // row accepts free-form questions, not just the three presets.
-    input.placeholder = "或直接提问，回车发送…";
+    input.placeholder = "或直接提问，回车发送";
     input.title = "输入问题后回车：会带上这段划线一起发给 AI";
     // Keep the PDF selection alive while typing, and stop the reader from
     // treating keystrokes as shortcuts.
