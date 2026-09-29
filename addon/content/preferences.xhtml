@@ -350,6 +350,16 @@
     <details class="advanced">
       <summary>调试</summary>
       <div class="field">
+        <label for="screenshotDir">截图存储位置</label>
+        <input id="screenshotDir" type="text" placeholder="留空 = 数据目录/highlight-ask/debug" />
+        <div class="desc">
+          点击「截图预览」时 PNG 的落盘位置。<b>留空</b>用默认目录；填<b>相对路径</b>
+          （如 <code>captures</code>）会放在数据目录的 <code>highlight-ask/</code> 下；
+          填<b>绝对路径</b>（如 <code>/tmp/ha</code>）则直接用它。
+        </div>
+      </div>
+
+      <div class="field">
         <div class="check">
           <input id="debugScreenshot" type="checkbox" />
           <label for="debugScreenshot" style="font-weight: 400; margin: 0">

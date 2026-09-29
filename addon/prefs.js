@@ -34,6 +34,11 @@ pref("sendSI", true);
 // PDF canvas and saves it to <data dir>/highlight-ask/debug/ so it can be
 // inspected. Off by default; it is a development aid.
 pref("debugScreenshot", true);
+// Where "截图预览" writes captured PNGs.
+//
+// Empty means the default: <data dir>/highlight-ask/debug. A relative value is
+// taken as a subdirectory of the plugin folder; an absolute path is used as is.
+pref("screenshotDir", "");
 // Attach a cropped screenshot of the selection. PDF text extraction flattens
 // fractions and drops norm bars, so a screenshot is the only reliable source
 // for formulas. Large selections are tiled so nothing is resampled.
